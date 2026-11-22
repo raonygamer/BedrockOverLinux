@@ -51,6 +51,7 @@ install-owned)
     */preview.msixvc) printf '<Game/>' > "$4/MicrosoftGame.Config";;
     *) printf '<Package><Identity Name="Fixture" Publisher="CN=Fixture" Version="1.0.0.0"/></Package>' > "$4/appxmanifest.xml";;
     esac
+    if test -e "$XDG_CONFIG_HOME/truncated-package"; then touch "$4/.xodus-streaming.msixvc"; exit 0; fi
     truncate -s 560 "$4/.xodus-streaming.msixvc"
     printf msft-xvd | dd of="$4/.xodus-streaming.msixvc" bs=1 seek=512 conv=notrunc status=none;;
 run)
@@ -59,7 +60,9 @@ run)
         test -f "$BEDROCK_PROFILE_DIR/wrapper-ran"
         test "$PWD" = "$BEDROCK_PROFILE_DIR"
         test "$2" = "$BEDROCK_GAME_DIR"
-        test "$7" = -- && test "$8" = --fixture && test "$9" = 'literal $HOME'
+        test "$7" = --
+        test "$8" = --fixture
+        test "$9" = 'literal $HOME'
     fi
     if test -f "$2/MicrosoftGame.Config"; then test ! -e "$2/MicrosoftGame.config"
     else test -f "$2/MicrosoftGame.config"; fi
@@ -113,9 +116,22 @@ printf 'n\n' | "$cli" version 1.2.3 download
 printf 'y\n' | "$cli" version 1.2.3 download
 if printf 'y\n' | FAIL_INSTALL=1 "$cli" version 1.2.3 download; then exit 1; fi
 test "$shared" = "$("$cli" version 1.2.3 info | jq -r .uuid)"
+# A partial package must leave the existing files untouched and discard staging.
+clients="$XDG_CONFIG_HOME/bedrockoverlinux/versions/client"
+touch "$clients/$shared/keep-old" "$XDG_CONFIG_HOME/truncated-package"
+if printf 'y\n' | "$cli" version 1.2.3 download >"$scratch/download-error" 2>&1; then exit 1; fi
+grep -F 'invalid XVD header' "$scratch/download-error"
+test -e "$clients/$shared/keep-old"
+test -z "$(find "$clients" -name '.install-*' -print -quit)"
+rm "$XDG_CONFIG_HOME/truncated-package"
 # Track the catalog's declared head, reuse shared installs, and keep the previous UUID on failure.
 "$cli" profile create tracking --version latest_release
 "$cli" profile tracking version info | jq -e '.track=="latest_release" and .uuid==null'
+touch "$XDG_CONFIG_HOME/offline"
+if "$cli" profile tracking launch >"$scratch/launch-error" 2>&1; then exit 1; fi
+grep -F 'catalog unavailable for first launch' "$scratch/launch-error"
+"$cli" profile tracking version info | jq -e '.uuid==null'
+rm "$XDG_CONFIG_HOME/offline"
 "$cli" profile tracking launch
 "$cli" profile tracking version info | jq -e --arg id "$shared" '.uuid==$id'
 touch "$XDG_CONFIG_HOME/update" "$XDG_CONFIG_HOME/fail-download"
@@ -159,6 +175,29 @@ for setting in wrapper prelaunch args; do
     "$cli" profile first "$setting" clear
     "$cli" profile first "$setting" info | jq -e '.==[]'
 done
+"$cli" profile first wrapper set -- "$scratch/missing-wrapper"
+if "$cli" profile first launch; then exit 1; fi
+# Interrupt an active process tree. Its profile and prefix must become reusable.
+cat > "$scratch/wait-wrapper" <<'SH'
+#!/bin/sh
+echo "$$" > "$BEDROCK_PROFILE_DIR/wrapper.pid"
+exec sleep 60
+SH
+chmod +x "$scratch/wait-wrapper"
+"$cli" profile first wrapper set -- "$scratch/wait-wrapper"
+profile_id=$("$cli" profile first info | jq -r .uuid)
+prefix_id=$("$cli" profile first prefix info | jq -r .uuid)
+pidfile="$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$profile_id/wrapper.pid"
+"$cli" profile first launch >"$scratch/interrupted" 2>&1 &
+caller=$!
+for _ in {1..100}; do test -s "$pidfile" && break; sleep .1; done
+wrapper_pid=$(cat "$pidfile")
+unit="bedrock-game-$prefix_id.service"
+systemctl --user stop "$unit"
+wait "$caller" || :  # systemd can report a requested stop as successful.
+if kill -0 "$wrapper_pid" 2>/dev/null; then exit 1; fi
+"$cli" prefix list | grep -F "$prefix_id available"
+"$cli" profile first wrapper clear
 "$cli" profile first launch &
 playing=$!
 for _ in {1..100}; do
@@ -167,6 +206,10 @@ for _ in {1..100}; do
 done
 "$cli" profile list | grep 'second .*prefix busy'
 "$cli" prefix list | grep busy
+if "$cli" profile first prefix set changed-while-running; then exit 1; fi
+if "$cli" profile first env set WHILE_RUNNING changed; then exit 1; fi
+if printf 'y\n' | "$cli" version 1.2.3 download; then exit 1; fi
+test -e "$clients/$shared/keep-old"
 if "$cli" profile second launch; then exit 1; fi
 if printf 'y\nfirst\n' | "$cli" profile delete first; then exit 1; fi
 printf 'n\n' | "$cli" services kill Player
@@ -196,7 +239,25 @@ printf 'y\nfirst\n' | "$cli" profile "$target" delete
 test ! -e "$data"
 test ! -e "$data.json"
 "$cli" profile second prefix set default
+# Users left by another installation must survive an attempted launch.
+users="$XDG_CONFIG_HOME/bedrockoverlinux/prefixes/default/drive_c/users/$(id -un)/AppData/Roaming/Minecraft Bedrock/Users"
+test -L "$users"
+unlink "$users"
+mkdir "$users"
+printf 'saved world' > "$users/world"
+if "$cli" profile second launch >"$scratch/storage-error" 2>&1; then exit 1; fi
+grep -F 'existing game data requires manual import' "$scratch/storage-error"
+test "$(cat "$users/world")" = 'saved world'
+mv "$users" "$scratch/external-worlds"
+ln -s "$scratch/external-worlds" "$users"
+if "$cli" profile second launch >"$scratch/storage-error" 2>&1; then exit 1; fi
+grep -F 'unmanaged storage link' "$scratch/storage-error"
+test "$(readlink "$users")" = "$scratch/external-worlds"
+test "$(cat "$users/world")" = 'saved world'
+unlink "$users"
 "$cli" profile second launch
+second_id=$("$cli" profile second info | jq -r .uuid)
+test "$(readlink "$users")" = "$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$second_id/Users"
 printf 'y\nrelease\n' | "$cli" profile delete release
 if "$cli" profile release info; then exit 1; fi
 "$cli" profile preview info > /dev/null

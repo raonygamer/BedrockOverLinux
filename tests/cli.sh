@@ -37,6 +37,25 @@ reject "$cli" profile Example env set XODUS_SOCKET elsewhere
 "$cli" profile Example prefix set 'second-prefix'
 "$cli" profile Example prefix info | grep -F 'second-prefix'
 reject "$cli" profile Example prefix set '../escape'
+# Independent concurrent edits on one record must all survive.
+pids=()
+for i in {1..12}; do "$cli" profile Example env set "JOB_$i" "$i" & pids+=("$!"); done
+for pid in "${pids[@]}"; do wait "$pid"; done
+settings=$("$cli" profile "$id" env list)
+for i in {1..12}; do
+    expected=$(printf '"JOB_%d": "%d"' "$i" "$i")
+    grep -Fq "$expected" <<< "$settings"
+done
+
+# Incomplete JSON must fail without overwriting the damaged record.
+record="$root/profiles/$id.json"
+mv "$record" "$scratch/intact.json"
+printf '{' > "$record"
+reject "$cli" profile "$id" env set AFTER_DAMAGE ignored
+test "$(cat "$record")" = '{'
+mv "$scratch/intact.json" "$record"
+"$cli" profile "$id" env list | grep -F JOB_12
+
 # Competing creates must commit exactly one record.
 pids=()
 for _ in {1..8}; do "$cli" profile create race >/dev/null 2>&1 & pids+=("$!"); done
