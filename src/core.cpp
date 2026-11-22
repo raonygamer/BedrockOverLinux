@@ -73,19 +73,13 @@ Lock::Lock(const fs::path &path, bool shared, bool wait) {
 }
 Lock::~Lock() { close(fd); }
 
-Result process(Args args, const Env &env, bool capture) {
-    int pipefd[2];
-    if (capture && pipe2(pipefd, O_CLOEXEC))
-        throw std::system_error(errno, std::generic_category(), "pipe");
+pid_t spawn_process(Args args, const Env &env, int input, int output, int error) {
     pid_t pid = fork();
-    if (pid < 0)
-        throw std::system_error(errno, std::generic_category(), "fork");
+    if (pid < 0) throw std::system_error(errno, std::generic_category(), "fork");
     if (pid == 0) {
-        if (capture) {
-            dup2(pipefd[1], STDOUT_FILENO);
-            close(pipefd[0]);
-            close(pipefd[1]);
-        }
+        if ((input >= 0 && dup2(input, STDIN_FILENO) < 0) ||
+            (output >= 0 && dup2(output, STDOUT_FILENO) < 0) ||
+            (error >= 0 && dup2(error, STDERR_FILENO) < 0)) _exit(127);
         for (const auto &[k, v] : env)
             setenv(k.c_str(), v.c_str(), 1);
         std::vector<char *> argv;
@@ -95,6 +89,20 @@ Result process(Args args, const Env &env, bool capture) {
         execvp(argv[0], argv.data());
         perror(argv[0]);
         _exit(127);
+    }
+    return pid;
+}
+
+Result process(Args args, const Env &env, bool capture) {
+    int pipefd[2]{-1, -1};
+    if (capture && pipe2(pipefd, O_CLOEXEC))
+        throw std::system_error(errno, std::generic_category(), "pipe");
+    pid_t pid;
+    try {
+        pid = spawn_process(std::move(args), env, -1, pipefd[1], -1);
+    } catch (...) {
+        if (capture) { close(pipefd[0]); close(pipefd[1]); }
+        throw;
     }
     std::string output;
     if (capture) {

@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include <fstream>
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -38,6 +39,33 @@ void verify_executable(const Tool &tool, const std::string &binary) {
     auto arg = tool.name == "xvdtool" ? "-h" : (tool.name == "winegdk" ? "--version" : "--help");
     if (process({binary, arg}, tool.name == "xvdtool" ? xvdtool_environment() : Env{}, true).status != 0)
         throw std::runtime_error(binary + " failed its startup check");
+}
+
+// Wine looks beside its loader before consulting WINESERVER. Keep the vendor
+// binary beside this adapter and change only server starts for a Bedrock session.
+void configure_idle_timeout(const fs::path &wine) {
+    auto server = wine.parent_path() / "wineserver";
+    if (!fs::is_regular_file(fs::symlink_status(server))) return;
+    std::ifstream input(server, std::ios::binary);
+    char magic[4];
+    if (!input.read(magic, sizeof(magic)) || std::string(magic, 4) != "\x7f" "ELF") return;
+    auto original = server.string() + ".bedrock-original";
+    auto temporary = server.string() + "." + uuid();
+    try {
+        fs::copy_file(server, temporary);
+        fs::rename(temporary, original);
+        write_file(temporary, R"SH(#!/bin/sh
+if [ -n "${BEDROCK_PROFILE_DIR:-}" ] && { [ "$#" -eq 0 ] || [ "$1" = "-d" ]; }; then
+    exec "$0.bedrock-original" -p0 "$@"
+fi
+exec "$0.bedrock-original" "$@"
+)SH");
+        fs::permissions(temporary, fs::status(server).permissions());
+        fs::rename(temporary, server);
+    } catch (...) {
+        fs::remove(temporary);
+        throw;
+    }
 }
 
 void install(const Tool &t, const Json &release) {
@@ -83,7 +111,9 @@ void install(const Tool &t, const Json &release) {
             throw;
         }
     }
-    verify_executable(t, find_binary(dest, t.primary));
+    auto binary = find_binary(dest, t.primary);
+    verify_executable(t, binary);
+    if (t.name == "winegdk") configure_idle_timeout(binary);
     if (t.name == "xodus")
         find_binary(dest, "xodus-service");
     save(dir / "current.json", {{"tag", tag}});

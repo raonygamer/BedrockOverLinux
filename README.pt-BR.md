@@ -37,6 +37,8 @@ O primeiro lançamento baixa o jogo. Para escolher uma versão específica, cons
 
 Para usar instalações próprias, forneça caminhos absolutos em `BEDROCK_XODUS_CLI`, `BEDROCK_XODUS_SERVICE`, `BEDROCK_WINE`, `BEDROCK_WINESERVER` ou `BEDROCK_XVDTOOL`. O WineGDK é identificado como `winegdk` ao procurar no PATH.
 
+No WineGDK gerenciado, o instalador configura o `wineserver` para iniciar o encerramento normal assim que o último cliente Wine sair da sessão do Bedrock. O prefixo fica bloqueado até o encerramento terminar. No lançamento direto, o Wine inicia seus serviços enquanto o Xodus prepara o jogo. Perfis com wrapper próprio deixam a inicialização a cargo dele. Em uma instalação existente, rode `bedrock tools install winegdk` uma vez após atualizar o CLI.
+
 ## Comandos
 
 ```text
@@ -89,7 +91,7 @@ O login fica salvo assim que o Xodus confirma a conta. Se a consulta do gamertag
 
 Os comandos de perfil exigem login. O primeiro uso cria `release` e `preview`. Cada perfil guarda o UUID da conta padrão vigente na criação. Um perfil recém-criado sem versão precisa de `version set` antes de jogar. Os nomes e gamertags servem para seleção interativa. As referências salvas usam UUID.
 
-Com `--version latest_release` ou `--version latest_preview`, o perfil consulta o canal a cada lançamento e instala a versão compartilhada se necessário. Se o catálogo estiver offline, ele pode usar a instalação já resolvida. Use `version set` com um número ou UUID para voltar a fixar a versão.
+Com `--version latest_release` ou `--version latest_preview`, o perfil consulta o canal a cada lançamento e instala a versão compartilhada se necessário. Quando a instalação já está no disco, a consulta ao catálogo tem um limite de três segundos para que o perfil possa usar essa instalação se estiver offline. Use `version set` com um número ou UUID para voltar a fixar a versão.
 
 O catálogo é o [minecraft-windows-gdk-version-db](https://github.com/LukasPAH/minecraft-windows-gdk-version-db). Uma instalação compartilhada é selecionada por número de versão. Repetir o download pede confirmação e preserva o UUID. Com `--copy`, cada download recebe outro UUID. Um download interrompido pode deixar uma pasta oculta de staging e preserva a instalação publicada.
 
@@ -119,9 +121,11 @@ xodus/<uuid>/
 tools/<ferramenta>/<tag>/
 ```
 
-`bedrock env COM_MOJANG set <perfil>` grava o caminho absoluto de `Shared/games/com.mojang` em `/etc/environment` com sudo e pede confirmação para substituir um valor existente. A configuração é da máquina e vale para shells que herdam o ambiente de uma nova sessão de login que lê esse arquivo. Sessões já abertas mantêm sua cópia, e o acesso aos mundos continua sujeito às permissões de arquivos do perfil.
+`bedrock env COM_MOJANG set <perfil>` grava o caminho absoluto de `Shared/games/com.mojang` em `/etc/environment` com privilégios administrativos e pede confirmação para substituir um valor existente. A configuração é da máquina. Novos shells interativos Bash e Fish carregam o valor mesmo em um desktop já aberto. Para atualizar o Bash atual, rode `. /etc/profile.d/bedrockoverlinux.sh`. No Fish atual, rode `source /etc/fish/conf.d/bedrockoverlinux.fish`. O acesso aos mundos segue as permissões de arquivos do perfil.
 
 ## Testes
+
+Com Bash, Fish e namespaces de usuário disponíveis, rode `bash tests/environment.sh build/bedrock` para testar a configuração dos shells em um `/etc` isolado.
 
 Depois da compilação, `bash tests/cli.sh build/bedrock` testa o CLI offline, inclusive a criação simultânea de perfis, a exclusão com confirmação e argumentos com espaços.
 

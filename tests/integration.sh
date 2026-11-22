@@ -60,6 +60,10 @@ install-owned)
     truncate -s 560 "$4/.xodus-streaming.msixvc"
     printf msft-xvd | dd of="$4/.xodus-streaming.msixvc" bs=1 seek=512 conv=notrunc status=none;;
 run)
+    if test -e "$XDG_CONFIG_HOME/reject-run"; then
+        for _ in $(seq 1 100); do test -e "$XDG_CONFIG_HOME/warm-started" && exit 1; sleep .02; done
+        exit 2
+    fi
     if test "${QA_STARTUP:-}" = 'value with spaces'; then
         test -f "$BEDROCK_PROFILE_DIR/prelaunch-ran"
         test -f "$BEDROCK_PROFILE_DIR/wrapper-ran"
@@ -82,12 +86,27 @@ cat > "$BEDROCK_WINE" <<'SH'
 mkdir -p "$WINEPREFIX/drive_c/users/$(id -un)/AppData/Roaming"
 touch "$WINEPREFIX/system.reg"
 SH
-printf '#!/bin/sh\nexit 0\n' > "$scratch/wineserver"
+cat > "$scratch/wineserver" <<'SH'
+#!/bin/sh
+set -eu
+test "$1" = -w
+if test -f "$XDG_CONFIG_HOME/hold-wine"; then
+    touch "$XDG_CONFIG_HOME/draining"
+    for _ in $(seq 1 100); do
+        test -f "$XDG_CONFIG_HOME/hold-wine" || exit 0
+        sleep .1
+    done
+    exit 1
+fi
+SH
 chmod +x "$scratch"/{xodus-cli,xodus-service,wine,wineserver}
 # Keep catalog requests local, exercising the external command protocol.
 cat > "$scratch/curl" <<'SH'
 #!/bin/sh
-test ! -e "$XDG_CONFIG_HOME/offline" || exit 1
+if test -e "$XDG_CONFIG_HOME/offline"; then
+    printf '%s\n' "$@" > "$XDG_CONFIG_HOME/catalog-args"
+    exit 1
+fi
 release=1.2.3
 if test -e "$XDG_CONFIG_HOME/update"; then release=1.2.10; fi
 printf '{"release":"%s","preview":"1.2.9","releaseVersions":[{"version":"Release 1.2.3","urls":["https://assets1.xboxlive.com/test.msixvc"]},{"version":"Release 1.2.10","urls":["https://assets1.xboxlive.com/next.msixvc"]}],"previewVersions":[{"version":"Preview 1.2.9","urls":["https://assets1.xboxlive.com/preview.msixvc"]}]}' "$release"
@@ -135,6 +154,7 @@ rm "$XDG_CONFIG_HOME/truncated-package"
 touch "$XDG_CONFIG_HOME/offline"
 if "$cli" profile tracking launch >"$scratch/launch-error" 2>&1; then exit 1; fi
 grep -F 'catalog unavailable for first launch' "$scratch/launch-error"
+grep -A1 -Fx -- '--max-time' "$XDG_CONFIG_HOME/catalog-args" | grep -Fx 30
 "$cli" profile tracking version info | jq -e '.uuid==null'
 rm "$XDG_CONFIG_HOME/offline"
 "$cli" profile tracking launch
@@ -147,6 +167,7 @@ rm "$XDG_CONFIG_HOME/fail-download"
 "$cli" profile tracking version info | jq -e '.version=="1.2.10" and .track=="latest_release"'
 touch "$XDG_CONFIG_HOME/offline"
 "$cli" profile tracking launch
+grep -A1 -Fx -- '--max-time' "$XDG_CONFIG_HOME/catalog-args" | grep -Fx 3
 rm "$XDG_CONFIG_HOME/offline"
 "$cli" profile tracking version set latest_preview
 "$cli" profile tracking launch
@@ -219,6 +240,17 @@ if "$cli" profile second launch; then exit 1; fi
 if printf 'y\nfirst\n' | "$cli" profile delete first; then exit 1; fi
 printf 'n\n' | "$cli" services kill Player
 wait "$playing"
+# The game command has returned, but Wine still has work in this prefix.
+touch "$XDG_CONFIG_HOME/hold-wine"
+"$cli" profile first launch &
+draining=$!
+for _ in {1..100}; do test -e "$XDG_CONFIG_HOME/draining" && break; sleep .1; done
+test -e "$XDG_CONFIG_HOME/draining"
+if "$cli" profile second launch >"$scratch/drain-error" 2>&1; then exit 1; fi
+grep -F 'prefix busy' "$scratch/drain-error"
+rm "$XDG_CONFIG_HOME/hold-wine"
+wait "$draining"
+"$cli" prefix list | grep -F "$prefix_id available"
 "$cli" profile second prefix set another
 "$cli" profile second prefix info | jq -e '.name=="another"'
 "$cli" profile second version set "$shared"
@@ -228,6 +260,25 @@ second=$!
 first=$!
 wait "$first"
 wait "$second"
+# Exercise the managed Wine path, including EOF when Xodus exits with an error.
+managed="$XDG_CONFIG_HOME/bedrockoverlinux/tools/winegdk"
+mkdir -p "$managed/test/bin"
+printf '{"tag":"test"}' > "$managed/current.json"
+cp "$scratch/wineserver" "$managed/test/bin/wineserver"
+touch "$managed/test/bin/wineserver.bedrock-original"
+cat > "$managed/test/bin/wine" <<'SH'
+#!/bin/sh
+set -eu
+test "$*" = "cmd /d /q"
+touch "$XDG_CONFIG_HOME/warm-started"
+cat >/dev/null
+touch "$XDG_CONFIG_HOME/warm-finished"
+SH
+chmod +x "$managed/test/bin/wine"
+if (unset BEDROCK_WINE; touch "$XDG_CONFIG_HOME/reject-run"; "$cli" profile first launch); then exit 1; fi
+test -e "$XDG_CONFIG_HOME/warm-finished"
+rm "$XDG_CONFIG_HOME/reject-run"
+"$cli" prefix list | grep -F "$prefix_id available"
 "$cli" services info Player | grep running
 "$cli" services licence Player
 "$cli" services ciks Player | grep -q '0000000000000000$'

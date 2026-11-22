@@ -25,9 +25,9 @@ std::vector<Json> installed() {
         }
     return rows;
 }
-Json catalog(Json *latest = nullptr) {
+Json catalog(Json *latest = nullptr, bool can_launch_offline = false) {
     auto path = root() / "versions/catalog.json";
-    auto result = process({"curl", "-fsSL", "--proto", "=https", "--max-time", "30",
+    auto result = process({"curl", "-fsSL", "--proto", "=https", "--max-time", can_launch_offline ? "3" : "30",
                            "https://raw.githubusercontent.com/LukasPAH/minecraft-windows-gdk-version-db/refs/"
                            "heads/main/historical_versions.json"},
                           {}, true);
@@ -148,7 +148,9 @@ void update_profile_version(Json &profile, const Json &account) {
     const std::string channel = track == "latest_release" ? "release" : "preview";
     if (track != "latest_release" && track != "latest_preview") throw std::runtime_error("invalid version track");
     Json latest = Json::object();
-    if (catalog(&latest).is_null()) {
+    bool installed_before = !profile.at("version").is_null() &&
+        fs::is_regular_file(clients() / profile.at("version").get<std::string>() / "installation.json");
+    if (catalog(&latest, installed_before).is_null()) {
         if (profile.at("version").is_null()) throw std::runtime_error("catalog unavailable for first launch");
         std::cerr << "Catalog unavailable; using the previous installation.\n";
         return;

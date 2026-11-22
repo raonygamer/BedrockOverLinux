@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <sys/types.h>
 using Json = nlohmann::json;
 namespace fs = std::filesystem;
 using Args = std::vector<std::string>;
@@ -29,6 +30,7 @@ struct Result {
     int status;
     std::string output;
 };
+pid_t spawn_process(Args, const Env &, int input, int output, int error);
 Result process(Args, const Env & = {}, bool capture = false);
 std::string checked(Args, const Env & = {}, bool capture = false);
 bool confirm(const std::string &, bool yes = false);

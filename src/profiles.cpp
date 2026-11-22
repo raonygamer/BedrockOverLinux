@@ -1,5 +1,7 @@
 #include "core.hpp"
 #include <fstream>
+#include <fcntl.h>
+#include <sys/wait.h>
 #include <iostream>
 #include <pugixml.hpp>
 #include <pwd.h>
@@ -31,8 +33,7 @@ Json new_profile(const std::string &name, const Json &account, const Json &px) {
             {"prefix", px.at("uuid")},
             {"version", nullptr}};
 }
-void initialize(const Json &account) {
-    auto px = prefix("default", true);
+std::vector<Json> initialize(const Json &account) {
     auto profiles = root() / "profiles";
     fs::create_directories(profiles);
     // A renamed record means both confirmations completed, even after an interrupted cleanup.
@@ -51,7 +52,7 @@ void initialize(const Json &account) {
         auto backup = root() / "legacy" / (id(p) + ".json");
         if (!fs::exists(backup))
             save(backup, p);
-        auto converted = new_profile(p.at("name"), account, px);
+        auto converted = new_profile(p.at("name"), account, prefix("default", true));
         converted["uuid"] = p.at("uuid");
         if (p.contains("version") && p["version"].is_string()) {
             try {
@@ -61,15 +62,18 @@ void initialize(const Json &account) {
             }
         }
         put("profiles", converted);
+        p = std::move(converted);
     }
     auto seeded = profiles / ".defaults-created";
-    if (fs::exists(seeded)) return;
+    if (fs::exists(seeded)) return rows;
+    auto px = prefix("default", true);
     for (std::string name : {"release", "preview"}) {
         auto matches = [&](const Json &r) { return r.at("name") == name; };
         if (std::none_of(rows.begin(), rows.end(), matches))
             put("profiles", new_profile(name, account, px));
     }
     write_file(seeded, "");
+    return records("profiles");
 }
 void select_version(Json &profile, const std::string &value) {
     if (value == "latest_release" || value == "latest_preview") {
@@ -90,23 +94,67 @@ bool busy(const Json &px) {
         throw;
     }
 }
-std::string availability(const Json &p) {
-    if (busy(prefix(p.at("prefix"), false)))
-        return "prefix busy";
-    if (!fs::exists(record_path("accounts", p.at("account"))))
-        return "signed out";
-    if (!p.contains("track") && p.at("version").is_null())
-        return "select a version";
-    try {
-        if (!p.contains("track")) version_resolve(p.at("version"));
-        executable("wine");
-        executable("xodus-cli");
-        executable("xodus-service");
-    } catch (const std::exception &e) {
-        return e.what();
+// Take one snapshot per CLI invocation. The worker acquires the actual locks.
+struct LaunchChecks {
+    std::map<std::string, bool> prefixes_busy;
+    std::optional<std::string> tool_status;
+
+    std::string availability(const Json &profile) {
+        const std::string prefix_id = profile.at("prefix");
+        auto found = prefixes_busy.find(prefix_id);
+        if (found == prefixes_busy.end())
+            found = prefixes_busy.emplace(prefix_id, busy(prefix(prefix_id, false))).first;
+        if (found->second) return "prefix busy";
+        if (!fs::exists(record_path("accounts", profile.at("account")))) return "signed out";
+        if (!profile.contains("track")) {
+            if (profile.at("version").is_null()) return "select a version";
+            try {
+                version_resolve(profile.at("version"));
+            } catch (const std::exception &e) {
+                return e.what();
+            }
+        }
+        if (!tool_status) {
+            try {
+                executable("wine");
+                executable("xodus-cli");
+                executable("xodus-service");
+                tool_status = "ready";
+            } catch (const std::exception &e) {
+                tool_status = e.what();
+            }
+        }
+        return *tool_status;
     }
-    return "ready";
-}
+};
+// Wine initializes its services while Xodus prepares the licensed executable.
+class WineWarmup {
+    pid_t pid;
+    int input;
+public:
+    WineWarmup(const std::string &wine, const Env &env) {
+        int channel[2];
+        if (pipe2(channel, O_CLOEXEC)) throw std::system_error(errno, std::generic_category(), "pipe");
+        int quiet = open("/dev/null", O_WRONLY | O_CLOEXEC);
+        try {
+            if (quiet < 0) throw std::system_error(errno, std::generic_category(), "/dev/null");
+            pid = spawn_process({wine, "cmd", "/d", "/q"}, env, channel[0], quiet, quiet);
+        } catch (...) {
+            if (quiet >= 0) close(quiet);
+            close(channel[0]);
+            close(channel[1]);
+            throw;
+        }
+        close(quiet);
+        close(channel[0]);
+        input = channel[1];
+    }
+    WineWarmup(const WineWarmup &) = delete;
+    ~WineWarmup() {
+        close(input); // EOF exits cmd normally, including when Xodus fails to launch.
+        while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
+    }
+};
 void bind_storage(const fs::path &source, const fs::path &dest, const fs::path &owner) {
     fs::create_directories(source);
     fs::create_directories(dest.parent_path());
@@ -169,8 +217,7 @@ void ensure_game_config(const fs::path &directory, const Json &version) {
 void profile_startup(const std::string &selector, const std::string &setting, const std::string &action,
                      const Args &values) {
     Lock metadata(root() / "locks/metadata");
-    initialize(default_account());
-    auto profile = lookup(records("profiles"), selector);
+    auto profile = lookup(initialize(default_account()), selector);
     auto configured = profile.value(setting, setting == "env" ? Json::object() : Json::array());
     if (action == "list" || action == "info") {
         std::cout << configured.dump(2) << '\n';
@@ -225,7 +272,11 @@ void worker(const std::string &selector) {
         !getenv("BEDROCK_WINESERVER") && fs::exists(server) ? server.string() : executable("wineserver");
     env["WINEPREFIX"] = dir.string();
     env["WINEBOOT_HIDE_DIALOG"] = "1";
-    if (!fs::exists(dir / "system.reg"))
+    const auto prelaunch = p.value("prelaunch", Args{});
+    const auto wrapper = p.value("wrapper", Args{});
+    // Custom launch commands can depend on a populated registry and drive_c.
+    // Direct launches use Wine's automatic first-run initialization.
+    if ((!prelaunch.empty() || !wrapper.empty()) && !fs::exists(dir / "system.reg"))
         checked({wine, "wineboot", "-u"}, env);
     auto user = getpwuid(getuid());
     if (!user)
@@ -260,8 +311,6 @@ void worker(const std::string &selector) {
     }
     env["BEDROCK_PROFILE_DIR"] = data.string();
     env["BEDROCK_GAME_DIR"] = game.string();
-    const auto prelaunch = p.value("prelaunch", Args{});
-    const auto wrapper = p.value("wrapper", Args{});
     const auto arguments = p.value("args", Args{});
     if (!arguments.empty()) {
         run.push_back("--");
@@ -270,7 +319,12 @@ void worker(const std::string &selector) {
     fs::current_path(data);
     if (!prelaunch.empty()) checked(prelaunch, env);
     run.insert(run.begin(), wrapper.begin(), wrapper.end());
+    std::optional<WineWarmup> warmup;
+    if (wrapper.empty() && !getenv("BEDROCK_WINE") && !getenv("BEDROCK_WINESERVER") &&
+        fs::is_regular_file(server.string() + ".bedrock-original"))
+        warmup.emplace(wine, env);
     auto result = process(run, env);
+    warmup.reset();
     checked({env.at("WINESERVER"), "-w"}, env);
     if (result.status)
         throw std::runtime_error("game exited " + std::to_string(result.status));
@@ -280,8 +334,7 @@ void profile_command(const std::string &action, const std::string &selector, con
     if (action == "delete") {
         {
             Lock metadata(root() / "locks/metadata");
-            initialize(default_account());
-            profile = lookup(records("profiles"), selector);
+            profile = lookup(initialize(default_account()), selector);
         }
         auto uuid = id(profile);
         Lock lease(root() / "locks" / (uuid + ".profile"), false, false);
@@ -323,12 +376,12 @@ void profile_command(const std::string &action, const std::string &selector, con
             return;
         }
         auto account = default_account();
-        initialize(account);
-        auto rows = records("profiles");
+        auto rows = initialize(account);
         if (action == "list") {
+            LaunchChecks checks;
             bool color = isatty(STDOUT_FILENO) && !getenv("NO_COLOR");
             for (auto &p : rows) {
-                auto state = availability(p);
+                auto state = checks.availability(p);
                 std::cout << (color ? (state == "ready" ? "\033[32m" : "\033[31m") : "")
                           << p.at("name").get<std::string>() << " " << id(p) << " prefix=" << p["prefix"]
                           << " version=" << (p.contains("track") ? p.at("track") : p.at("version")) << " " << state << (color ? "\033[0m" : "") << '\n';
@@ -388,7 +441,7 @@ void profile_command(const std::string &action, const std::string &selector, con
             put("profiles", profile);
             return;
         }
-        auto state = availability(profile);
+        auto state = LaunchChecks{}.availability(profile);
         if (state != "ready")
             throw std::runtime_error(state);
     }
@@ -422,8 +475,7 @@ void env_command(const std::string &selector) {
     Json p;
     {
         Lock lock(root() / "locks/metadata");
-        initialize(default_account());
-        p = lookup(records("profiles"), selector);
+        p = lookup(initialize(default_account()), selector);
     }
     auto path = shared(p);
     fs::create_directories(path);
@@ -439,12 +491,36 @@ if [ "$2" = set ] || { [ -f "$file" ] && grep -Eq '^[[:space:]]*(export[[:space:
     read -r reply || exit 1
     case "$reply" in y|Y) ;; *) exit 1;; esac
 fi
-tmp=$(mktemp /etc/.bedrock-environment.XXXXXX)
-trap 'rm -f "$tmp"' EXIT
+# Hooks read only the value written below, so changing profiles has one commit point.
+work=$(mktemp -d /etc/.bedrock-environment.XXXXXX)
+trap 'rm -rf -- "$work"' EXIT
+mkdir -p /etc/profile.d /etc/fish/conf.d
+cat > "$work/profile.sh" <<'POSIX'
+_bedrock_mojang=$(sed -n 's/^COM_MOJANG="\(.*\)"$/\1/p' /etc/environment)
+if [ -n "$_bedrock_mojang" ]; then export COM_MOJANG="$_bedrock_mojang"; fi
+unset _bedrock_mojang
+POSIX
+cat > "$work/profile.fish" <<'FISH'
+set -l bedrock_mojang (string replace --filter --regex '^COM_MOJANG="(.*)"$' '$1' < /etc/environment)
+if test (count $bedrock_mojang) -eq 1
+    set -gx COM_MOJANG "$bedrock_mojang"
+end
+FISH
+chmod 644 "$work/profile.sh" "$work/profile.fish"
+mv -fT "$work/profile.sh" /etc/profile.d/bedrockoverlinux.sh
+mv -fT "$work/profile.fish" /etc/fish/conf.d/bedrockoverlinux.fish
+hook='[ ! -r /etc/profile.d/bedrockoverlinux.sh ] || . /etc/profile.d/bedrockoverlinux.sh'
+for rc in /etc/bash.bashrc /etc/bashrc; do
+    if [ -f "$rc" ] && ! grep -Fxq "$hook" "$rc"; then
+        printf '\n%s\n' "$hook" >> "$rc"
+    fi
+done
+tmp="$work/environment"
 if [ -f "$file" ]; then
     cp --preserve=all "$file" "$tmp"
     awk '!/^[[:space:]]*(export[[:space:]]+)?COM_MOJANG[[:space:]]*=/' "$file" > "$tmp"
 else
+    touch "$tmp"
     chmod 644 "$tmp"
 fi
 printf 'COM_MOJANG="%s"\n' "$1" >> "$tmp"
@@ -452,10 +528,13 @@ mv -fT "$tmp" "$file"
 )SH";
     Args cmd{"/usr/bin/flock", "/etc/.bedrock-environment.lock",      "/bin/sh", "-c", script, "bedrock",
              path.string(),    getenv("COM_MOJANG") ? "set" : "unset"};
-    if (geteuid() != 0)
-        cmd.insert(cmd.begin(), "/usr/bin/sudo");
+    if (geteuid() != 0) {
+        bool use_sudo = isatty(STDIN_FILENO) && access("/usr/bin/sudo", X_OK) == 0;
+        cmd.insert(cmd.begin(), !use_sudo && access("/usr/bin/pkexec", X_OK) == 0
+                                    ? "/usr/bin/pkexec" : "/usr/bin/sudo");
+    }
     checked(cmd);
-    std::cout << "COM_MOJANG=" << path.string() << " (new login sessions)\n";
+    std::cout << "COM_MOJANG=" << path.string() << " (new Bash, Fish and login sessions)\n";
 }
 
 namespace {
