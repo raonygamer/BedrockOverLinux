@@ -76,6 +76,7 @@ run)
         test "$7" = --
         test "$8" = --fixture
         test "$9" = 'literal $HOME'
+        if test -n "${QA_TAIL:-}"; then test "${10}" = "$QA_TAIL"; fi
     fi
     if test -f "$2/MicrosoftGame.Config"; then test ! -e "$2/MicrosoftGame.config"
     else test -f "$2/MicrosoftGame.config"; fi
@@ -200,6 +201,14 @@ if "$cli" profile first env set WINEPREFIX /tmp; then exit 1; fi
 if "$cli" profile first launch; then exit 1; fi
 "$cli" profile first prelaunch set -- touch prelaunch-ran
 "$cli" profile first launch
+"$cli" profile first env set QA_TAIL 'after command'
+"$cli" profile first wrapper set -- "$scratch/wrap" '%command%' 'after command'
+"$cli" profile first launch
+"$cli" profile first env unset QA_TAIL
+"$cli" profile first wrapper set -- 'test -d "$BEDROCK_PROFILE_DIR" && %command% && touch shell-template-passed'
+"$cli" profile first launch
+first_uuid=$("$cli" profile first info | jq -r .uuid)
+test -f "$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$first_uuid/shell-template-passed"
 "$cli" profile first env unset QA_STARTUP
 for setting in wrapper prelaunch args; do
     "$cli" profile first "$setting" clear

@@ -73,6 +73,8 @@ bedrock shortcut add <nome|uuid>
 bedrock shortcut info <nome|uuid>
 bedrock shortcut delete <nome|uuid>
 bedrock shortcut list
+bedrock shortcut update
+bedrock completion fish
 
 bedrock services list
 bedrock services info <gamertag>
@@ -104,6 +106,23 @@ Todos os perfis começam no prefixo `default`. `prefix set` aceita um prefixo ex
 Cada login usa um diretório privado do Xodus. O serviço systemd de usuário daquela conta sobe sob demanda. `services kill` pede confirmação se o serviço está em uso. `services ciks` solicita ao Xodus as chaves licenciadas dos conteúdos Bedrock instalados e as imprime na saída padrão.
 
 Use `bedrock shortcut add release` para adicionar **Minecraft Bedrock - release** ao menu de aplicativos. O atalho inicia o perfil pelo UUID sem abrir um terminal e fica em `$XDG_DATA_HOME/applications` (por padrão, `~/.local/share/applications`) para o seu usuário. Se mover o CLI, repita `add` para atualizar o caminho. Se já excluiu o perfil, use o UUID de `shortcut list` para remover o atalho.
+
+O catálogo fica em `shortcuts.json` na pasta de configuração. `bedrock shortcut update` importa atalhos Bedrock existentes, atualiza caminhos e ícones e recria as entradas cadastradas que sumiram do menu. O ícone vem do pacote do jogo selecionado. Perfis que acompanham um canal também podem usar outro pacote instalado do mesmo canal. Na ausência de um ícone adequado, o menu usa o ícone de jogos até a próxima atualização.
+
+O wrapper recebe o comando completo do Xodus, incluindo o executável Wine e os argumentos do jogo. Com argumentos separados, `%command%` insere o comando na posição escolhida. Se omitir o marcador, o comando entra ao final. Para usar operadores do shell ou atribuir variáveis, passe uma única expressão entre aspas com `%command%` como palavra sem aspas dentro dela. Espaços nos argumentos do jogo são preservados.
+
+```sh
+bedrock profile release wrapper set -- gamescope -f -- %command%
+bedrock profile release wrapper set -- 'MANGOHUD=1 gamemoderun %command%'
+bedrock profile release wrapper clear
+```
+
+Para instalar o autocomplete no Fish, rode no próprio Fish:
+
+```fish
+mkdir -p "$__fish_config_dir/completions"
+bedrock completion fish > "$__fish_config_dir/completions/bedrock.fish"
+```
 
 ## Arquivos
 

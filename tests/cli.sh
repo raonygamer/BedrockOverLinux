@@ -71,6 +71,32 @@ test "$desktop" = "$XDG_DATA_HOME/applications/bedrockoverlinux-$id.desktop"
 "$cli" shortcut add "$id" | grep -Fx "$desktop"
 "$cli" shortcut info Example | grep -F "profile $id launch"
 "$cli" shortcut list | grep -F "Example $id"
+# Migrate a pre-catalog desktop entry, resolve an icon from the matching channel,
+# then recreate a missing entry from the persisted UUID.
+rm "$root/shortcuts.json"
+version_id=$(cat /proc/sys/kernel/random/uuid)
+install_dir="$root/versions/client/$version_id"
+mkdir -p "$install_dir/game/Assets"
+printf '{"uuid":"%s","version":"1.0","channel":"preview","executable":"Minecraft.exe"}' "$version_id" > "$install_dir/installation.json"
+printf '<Package xmlns:uap="urn:test"><Applications><Application><uap:VisualElements Square150x150Logo="Assets\\Tile.png"/></Application></Applications></Package>' > "$install_dir/game/AppxManifest.xml"
+touch "$install_dir/game/Assets/Tile.png"
+"$cli" shortcut update
+grep -Fq "$id" "$root/shortcuts.json"
+grep -Fx "Icon=$install_dir/game/Assets/Tile.png" "$desktop"
+unlink "$desktop"
+"$cli" shortcut update
+test -f "$desktop"
+if command -v fish >/dev/null; then
+    "$cli" completion fish > "$scratch/bedrock.fish"
+    fish -n "$scratch/bedrock.fish"
+    PATH="$(dirname "$cli"):$PATH" fish --no-config -c '
+        source "$argv[1]"
+        complete -C "bedrock shortcut up" | string match -qr "^update"
+        and complete -C "bedrock profile Example wr" | string match -qr "^wrapper"
+        and complete -C "bedrock profile delete Ex" | string match -qr "^Example"
+        and complete -C "bedrock profile create sample --version latest_p" | string match -qr "^latest_preview"
+    ' "$scratch/bedrock.fish"
+fi
 if command -v desktop-file-validate >/dev/null; then desktop-file-validate "$desktop"; fi
 "$cli" shortcut delete Example
 test -e "$root/profiles/$id.json"
@@ -91,6 +117,7 @@ test ! -e "$root/profiles/$id.json" && test -f "$scratch/keep"
 "$cli" shortcut list | grep -F "(missing profile) $id"
 "$cli" shortcut delete "$id"
 test ! -e "$desktop"
+if grep -q "$id" "$root/shortcuts.json"; then exit 1; fi
 
 # Recover a deletion interrupted between hiding the record and removing its data.
 rid=$("$cli" profile create recovery)

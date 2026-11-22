@@ -73,6 +73,8 @@ bedrock shortcut add <name|uuid>
 bedrock shortcut info <name|uuid>
 bedrock shortcut delete <name|uuid>
 bedrock shortcut list
+bedrock shortcut update
+bedrock completion fish
 
 bedrock services list
 bedrock services info <gamertag>
@@ -104,6 +106,23 @@ All profiles start with the `default` Wine prefix. Use `prefix set` to select an
 Each login has a private Xodus directory. The account's systemd user service starts on demand. The `services kill` command asks for confirmation if the service is in use. The `services ciks` command asks Xodus for the licensed content keys for installed Bedrock packages and prints them to standard output.
 
 Run `bedrock shortcut add release` to add **Minecraft Bedrock - release** to your application menu. The desktop entry launches the profile by UUID without opening a terminal. It lives in `$XDG_DATA_HOME/applications` (default `~/.local/share/applications`) for your desktop user. Run `add` again after moving the CLI to refresh its path. If you already deleted the profile, use the UUID from `shortcut list` to remove its shortcut.
+
+The shortcut catalog is `shortcuts.json` in the configuration directory. `bedrock shortcut update` imports existing Bedrock shortcuts, refreshes paths and icons, and recreates missing catalogued entries. Icons come from the selected game package. A tracking profile can also use an installed package from the same channel. When no suitable icon is installed, the desktop uses the games icon until the next update.
+
+A wrapper receives the full Xodus launch command, including the Wine executable and the profile’s game arguments. With separate arguments, `%command%` inserts that command at the chosen position. Without a placeholder, the command is appended. For shell operators or environment assignments, pass one quoted template and leave `%command%` as an unquoted word inside it. The game arguments retain their original boundaries.
+
+```sh
+bedrock profile release wrapper set -- gamescope -f -- %command%
+bedrock profile release wrapper set -- 'MANGOHUD=1 gamemoderun %command%'
+bedrock profile release wrapper clear
+```
+
+Install the Fish completions from Fish:
+
+```fish
+mkdir -p "$__fish_config_dir/completions"
+bedrock completion fish > "$__fish_config_dir/completions/bedrock.fish"
+```
 
 ## Files
 

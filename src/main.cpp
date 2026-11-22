@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "completion.hpp"
 #include <CLI/CLI.hpp>
 #include <iostream>
 #include <sys/stat.h>
@@ -72,11 +73,12 @@ int main(int argc, char **argv) {
             auto cmd = leaf(options, action, action + " " + setting, [&, setting, action] {
                 profile_startup(selector, setting, action, startup_values);
             });
-            if (action == "set") cmd->add_option("argv", startup_values, "Literal arguments; use -- before flags")->required();
+            if (action == "set") cmd->add_option("argv", startup_values, setting == "wrapper" ? "Wrapper argv or one shell template with %command%" : "Literal arguments; use -- before flags")->required();
         }
     }
     auto shortcuts = group(&app, "shortcut", "Application menu shortcuts for profiles");
     leaf(shortcuts, "list", "List installed profile shortcuts", [] { shortcut_command("list", ""); });
+    leaf(shortcuts, "update", "Refresh all catalogued desktop entries", [] { shortcut_command("update", ""); });
     for (const auto &[op, description] : std::map<std::string, std::string>{
              {"add", "Install or refresh a profile shortcut"}, {"info", "Show the desktop entry and its path"},
              {"delete", "Remove a profile shortcut"}}) {
@@ -123,6 +125,11 @@ int main(int argc, char **argv) {
     leaf(mojang, "set", "Set for future system login sessions", [&] { env_command(value); })
         ->add_option("profile", value)
         ->required();
+    auto completion = group(&app, "completion", "Generate shell completions");
+    leaf(completion, "fish", "Print Fish completions", [&] { fish_completions(app); });
+    auto values = leaf(&app, "_complete", "Local shell completion values", [&] { completion_values(value); });
+    values->group("");
+    values->add_option("kind", value)->required();
     auto internal = leaf(&app, "_run", "Internal game supervisor", [&] { worker(value); });
     internal->group("");
     internal->add_option("uuid", value)->required();

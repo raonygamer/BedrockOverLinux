@@ -7,6 +7,7 @@
 #include <pwd.h>
 #include <regex>
 #include <sstream>
+#include <set>
 #include <strings.h>
 #include <unistd.h>
 
@@ -355,7 +356,26 @@ void worker(const std::string &selector) {
     }
     fs::current_path(data);
     if (!prelaunch.empty()) checked(prelaunch, env);
-    run.insert(run.begin(), wrapper.begin(), wrapper.end());
+    if (!wrapper.empty()) {
+        const std::string token = "%command%";
+        if (wrapper.size() == 1 && wrapper.front() != token && wrapper.front().find(token) != std::string::npos) {
+            std::string script = wrapper.front();
+            for (size_t pos = 0; (pos = script.find(token, pos)) != std::string::npos; pos += 4)
+                script.replace(pos, token.size(), "\"$@\"");
+            run.insert(run.begin(), {"/bin/sh", "-c", script, "bedrock-wrapper"});
+        } else {
+            Args expanded;
+            bool inserted = false;
+            for (const auto &word : wrapper) {
+                if (word == token) {
+                    expanded.insert(expanded.end(), run.begin(), run.end());
+                    inserted = true;
+                } else expanded.push_back(word);
+            }
+            if (!inserted) expanded.insert(expanded.end(), run.begin(), run.end());
+            run = std::move(expanded);
+        }
+    }
     std::optional<WineWarmup> warmup;
     if (wrapper.empty() && !getenv("BEDROCK_WINE") && !getenv("BEDROCK_WINESERVER") &&
         fs::is_regular_file(server.string() + ".bedrock-original"))
@@ -600,9 +620,76 @@ bool managed_shortcut(const fs::path &path, const std::string &uuid) {
     if (!fs::is_regular_file(fs::symlink_status(path))) return false;
     std::ifstream file(path);
     std::string line;
-    while (std::getline(file, line))
-        if (line == "X-BedrockOverLinux-Profile=" + uuid) return true;
-    return false;
+    const auto exec_prefix = "Exec=/usr/bin/env " + desktop_argument("XDG_CONFIG_HOME=" + root().parent_path().string()) + " ";
+    bool matches_profile = false, matches_config = false;
+    while (std::getline(file, line)) {
+        if (line == "X-BedrockOverLinux-Profile=" + uuid) matches_profile = true;
+        if (line.starts_with(exec_prefix)) matches_config = true;
+    }
+    return matches_profile && matches_config;
+}
+std::string shortcut_icon(const Json &profile) {
+    const auto clients = root() / "versions/client";
+    std::vector<fs::path> installations;
+    if (profile.at("version").is_string()) {
+        const std::string version = profile.at("version");
+        if (is_uuid(version)) installations.push_back(clients / version);
+    }
+    if (profile.contains("track") && fs::exists(clients)) {
+        const auto channel = profile.at("track") == "latest_preview" ? "preview" : "release";
+        std::vector<fs::path> same_channel;
+        for (const auto &entry : fs::directory_iterator(clients)) {
+            if (!is_uuid(entry.path().filename().string())) continue;
+            auto metadata = entry.path() / "installation.json";
+            if (fs::is_regular_file(metadata) && read_json(metadata).value("channel", "") == channel)
+                same_channel.push_back(entry.path());
+        }
+        std::sort(same_channel.begin(), same_channel.end());
+        installations.insert(installations.end(), same_channel.begin(), same_channel.end());
+    }
+    for (const auto &path : installations) {
+        if (!fs::is_regular_file(path / "installation.json")) continue;
+        auto game = path / "game";
+        auto folder = game / fs::path(read_json(path / "installation.json").at("executable").get<std::string>()).parent_path();
+        if (!fs::is_directory(folder)) continue;
+        std::vector<std::string> icons;
+        for (const auto &entry : fs::directory_iterator(folder)) {
+            if (strcasecmp(entry.path().filename().c_str(), "AppxManifest.xml")) continue;
+            pugi::xml_document doc;
+            if (doc.load_file(entry.path().c_str())) {
+                auto visual = doc.select_node("//*[local-name()='VisualElements']").node();
+                for (auto key : {"Square150x150Logo", "Square44x44Logo", "Logo"})
+                    if (auto asset = visual.attribute(key)) icons.emplace_back(asset.value());
+            }
+            break;
+        }
+        icons.insert(icons.end(), {"Logo.png", "LargeLogo.png", "StoreLogo.png", "SmallLogo.png"});
+        for (auto icon : icons) {
+            std::replace(icon.begin(), icon.end(), '\\', '/');
+            auto full = fs::weakly_canonical(folder / icon);
+            auto relative = full.lexically_relative(fs::weakly_canonical(game));
+            if (relative.empty() || *relative.begin() == ".." || !fs::is_regular_file(full)) continue;
+            std::string escaped;
+            for (char c : full.string()) {
+                if (c == '\\') escaped += "\\\\";
+                else if (c == '\n') escaped += "\\n";
+                else if (c == '\r') escaped += "\\r";
+                else escaped += c;
+            }
+            return escaped;
+        }
+    }
+    return "applications-games";
+}
+
+void write_shortcut(const fs::path &path, const Json &profile, const std::string &uuid) {
+    auto name = profile.at("name").get<std::string>();
+    valid_name(name);
+    auto command = "/usr/bin/env " + desktop_argument("XDG_CONFIG_HOME=" + root().parent_path().string())
+                 + " " + desktop_argument(fs::read_symlink("/proc/self/exe").string()) + " profile " + uuid + " launch";
+    write_file(path, "[Desktop Entry]\nType=Application\nName=Minecraft Bedrock - " + name
+               + "\nExec=" + command + "\nIcon=" + shortcut_icon(profile) + "\nTerminal=false\nCategories=Game;\n"
+               + "X-BedrockOverLinux-Profile=" + uuid + "\n");
 }
 }
 
@@ -610,51 +697,77 @@ void shortcut_command(const std::string &action, const std::string &selector) {
     Lock lock(root() / "locks/metadata");
     const auto directory = applications_directory();
     const std::string prefix = "bedrockoverlinux-";
-    if (action == "list") {
-        std::vector<std::string> shortcuts;
-        if (fs::exists(directory)) {
-            for (const auto &entry : fs::directory_iterator(directory)) {
-                const auto stem = entry.path().stem().string();
-                if (entry.path().extension() != ".desktop" || stem.rfind(prefix, 0) != 0) continue;
-                const auto uuid = stem.substr(prefix.size());
-                if (!is_uuid(uuid) || !managed_shortcut(entry.path(), uuid)) continue;
-                const auto profile = record_path("profiles", uuid);
-                auto name = fs::exists(profile) ? read_json(profile).at("name").get<std::string>() : "(missing profile)";
-                shortcuts.push_back(name + " " + uuid + " " + entry.path().string());
+    const auto catalog = root() / "shortcuts.json";
+    std::set<std::string> shortcuts;
+    const bool has_catalog = fs::exists(catalog);
+    if (has_catalog) {
+        auto data = read_json(catalog);
+        if (data.at("schema") != 1) throw std::runtime_error("unsupported shortcut catalog");
+        shortcuts = data.at("profiles").get<std::set<std::string>>();
+        for (const auto &uuid : shortcuts)
+            if (!is_uuid(uuid)) throw std::runtime_error("invalid profile UUID in shortcut catalog");
+    }
+    auto persist = [&] { save(catalog, {{"schema", 1}, {"profiles", shortcuts}}); };
+    const auto previous_size = shortcuts.size();
+    if (fs::exists(directory)) {
+        for (const auto &entry : fs::directory_iterator(directory)) {
+            auto stem = entry.path().stem().string();
+            if (entry.path().extension() != ".desktop" || stem.rfind(prefix, 0) != 0) continue;
+            auto uuid = stem.substr(prefix.size());
+            if (is_uuid(uuid) && managed_shortcut(entry.path(), uuid)) shortcuts.insert(uuid);
+        }
+    }
+    if (!has_catalog || previous_size != shortcuts.size()) persist();
+    if (action == "list" || action == "update") {
+        bool failed = false;
+        std::vector<std::string> lines;
+        for (const auto &uuid : shortcuts) {
+            const auto record = record_path("profiles", uuid);
+            const auto path = directory / (prefix + uuid + ".desktop");
+            try {
+                if (!fs::exists(record)) {
+                    lines.push_back("(missing profile) " + uuid + " " + path.string());
+                    continue;
+                }
+                auto profile = read_json(record);
+                auto name = profile.at("name").get<std::string>();
+                if (action == "update") {
+                    if (fs::exists(fs::symlink_status(path)) && !managed_shortcut(path, uuid))
+                        throw std::runtime_error("unmanaged shortcut: " + path.string());
+                    write_shortcut(path, profile, uuid);
+                }
+                lines.push_back(name + " " + uuid + " " + path.string());
+            } catch (const std::exception &e) {
+                failed = true;
+                std::cerr << uuid << ": " << e.what() << '\n';
             }
         }
-        std::sort(shortcuts.begin(), shortcuts.end());
-        for (const auto &line : shortcuts) std::cout << line << '\n';
+        std::sort(lines.begin(), lines.end());
+        for (const auto &line : lines) std::cout << line << '\n';
         if (shortcuts.empty()) std::cout << "No profile shortcuts.\n";
+        if (failed) throw std::runtime_error("could not process all shortcuts");
         return;
     }
-    std::string uuid = selector, name;
+    std::string uuid = selector;
+    Json profile;
     if (action == "add" || !is_uuid(selector)) {
-        if (action == "add") initialize(default_account());
-        auto profile = lookup(records("profiles"), selector);
+        auto profiles = action == "add" ? initialize(default_account()) : records("profiles");
+        profile = lookup(profiles, selector);
         uuid = id(profile);
-        name = profile.at("name");
     }
     const auto path = directory / (prefix + uuid + ".desktop");
     const bool exists = fs::exists(fs::symlink_status(path));
-    if (exists && !managed_shortcut(path, uuid))
-        throw std::runtime_error("unmanaged shortcut: " + path.string());
+    if (exists && !managed_shortcut(path, uuid)) throw std::runtime_error("unmanaged shortcut: " + path.string());
     if (action == "add") {
-        valid_name(name);
-        auto binary = fs::read_symlink("/proc/self/exe").string();
-        auto command = "/usr/bin/env " + desktop_argument("XDG_CONFIG_HOME=" + root().parent_path().string())
-                     + " " + desktop_argument(binary) + " profile " + uuid + " launch";
-        write_file(path, "[Desktop Entry]\nType=Application\nName=Minecraft Bedrock - " + name
-                   + "\nExec=" + command + "\nIcon=applications-games\nTerminal=false\nCategories=Game;\n"
-                   + "X-BedrockOverLinux-Profile=" + uuid + "\n");
+        write_shortcut(path, profile, uuid);
+        shortcuts.insert(uuid);
+        persist();
         std::cout << path.string() << '\n';
-        return;
-    }
-    if (!exists) throw std::runtime_error("shortcut not installed: " + path.string());
-    if (action == "info") {
-        std::cout << path.string() << '\n' << std::ifstream(path).rdbuf();
-    } else {
+    } else if (action == "delete" && shortcuts.erase(uuid)) {
         fs::remove(path);
+        persist();
         std::cout << "Deleted " << path.string() << '\n';
-    }
+    } else if (action == "info" && exists) {
+        std::cout << path.string() << '\n' << std::ifstream(path).rdbuf();
+    } else throw std::runtime_error("shortcut not installed: " + path.string());
 }
