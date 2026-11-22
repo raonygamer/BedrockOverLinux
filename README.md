@@ -1,41 +1,43 @@
 # BedrockOverLinux
 
-CLI em C++ para gerenciar Minecraft Bedrock GDK no Linux. Rode `bedrock` para ver a ajuda ou acrescente `--help` a um comando.
+**English** · [Português (Brasil)](README.pt-BR.md)
 
-## Instalar
+A C++ command-line tool for running Minecraft Bedrock for Windows on Linux. Use `bedrock` to see the available commands or add `--help` to any command.
 
-Em Arch, Ubuntu, Debian e Fedora x86_64, rode no checkout:
+## Installation
+
+On x86_64 Arch Linux, Ubuntu, Debian or Fedora, clone the repository and run the installer.
 
 ```sh
+git clone https://github.com/raonygamer/BedrockOverLinux.git
+cd BedrockOverLinux
 ./install.sh
 ```
 
-O instalador obtém as dependências de compilação, compila o CLI e instala o comando em `~/.local/bin`, junto com as ferramentas independentes em sua pasta de configuração. Use `./install.sh --cli-only` para instalar somente o CLI. Em sistemas apt sem o pacote .NET 8, o xvdtool usa o runtime oficial da Microsoft em uma pasta privada, verificado por SHA-512. Para jogar, use uma sessão gráfica com systemd de usuário, Secret Service e drivers Vulkan.
+The installer installs build dependencies, compiles the CLI into `~/.local/bin`, and installs the external tools in your configuration directory. Use `./install.sh --cli-only` to install just the CLI. On apt-based systems that lack a .NET 8 package, xvdtool uses a private copy of the official Microsoft runtime verified with SHA-512. Playing requires a graphical session with a systemd user manager, a working Secret Service and Vulkan drivers.
 
-Com `~/.local/bin` no PATH:
+With `~/.local/bin` on your PATH, sign in with the Microsoft account that owns Minecraft for Windows and create a profile that follows the latest release.
 
 ```sh
 bedrock tools check
 bedrock auth login
-bedrock version list
-bedrock version <versão> download
-bedrock profile create servidor --version <versão>
-bedrock profile servidor launch
+bedrock profile create survival --version latest_release
+bedrock profile survival launch
 ```
 
-Substitua os argumentos entre ângulos pelos identificadores desejados.
+The first launch downloads the game. To pin a specific version, find it with `bedrock version list`, download it with `bedrock version <version> download` and select it with `bedrock profile survival version set <version>`.
 
-## Ferramentas externas
+## External tools
 
-`bedrock tools list` mostra os caminhos locais. `tools info [ferramenta]` detalha a seleção, `tools check [ferramenta]` consulta as releases e verifica se o programa executa. `tools install [ferramenta]` e `tools update [ferramenta]` obtêm a release Linux, conferem o SHA-256 publicado pelo GitHub e só ativam a versão depois de testar o executável. Sem argumento, operam sobre as três ferramentas. Cada versão fica em seu próprio diretório. Um processo em execução continua usando seus arquivos após um update.
+`bedrock tools list` shows local paths. Use `tools info [tool]` to inspect the selected installation or `tools check [tool]` to check upstream releases and test the local executable. The `tools install [tool]` and `tools update [tool]` commands download the Linux release, verify its SHA-256 against the digest published by GitHub and test the executable before activating it. Omit the tool name to operate on all three. Each release has its own directory, so running processes keep using their original files after an update.
 
-- [Xodus](https://github.com/BedrockNative/xodus) fornece login, licenças, instalação e execução licenciada. O binário Linux requer as bibliotecas nativas do upstream, incluindo WebKitGTK 4.1 e um Secret Service funcional no desktop.
-- [WineGDK](https://github.com/BedrockNative/WineGDK) executa o cliente Windows.
-- [xvdtool](https://github.com/AmethystAPI/xvdtool) inspeciona os metadados do pacote com `bedrock version <versão|uuid> info --package`. A distribuição Linux v1.0.3 requer o runtime .NET 8.
+- Xodus handles Microsoft sign-in, licensing, game installation and launch. Its Linux binary needs native libraries including WebKitGTK 4.1 and a working desktop Secret Service. [Xodus](https://github.com/BedrockNative/xodus)
+- WineGDK runs the Windows game client. [WineGDK](https://github.com/BedrockNative/WineGDK)
+- xvdtool inspects package metadata with `bedrock version <version|uuid> info --package`. Its v1.0.3 Linux release requires .NET 8. [xvdtool](https://github.com/AmethystAPI/xvdtool)
 
-Para usar instalações próprias, forneça caminhos absolutos em `BEDROCK_XODUS_CLI`, `BEDROCK_XODUS_SERVICE`, `BEDROCK_WINE`, `BEDROCK_WINESERVER` ou `BEDROCK_XVDTOOL`. O WineGDK é identificado como `winegdk` ao procurar no PATH.
+To use your own installations, set absolute paths in `BEDROCK_XODUS_CLI`, `BEDROCK_XODUS_SERVICE`, `BEDROCK_WINE`, `BEDROCK_WINESERVER` or `BEDROCK_XVDTOOL`. The CLI looks for WineGDK as `winegdk` on your PATH.
 
-## Comandos
+## Commands
 
 ```text
 bedrock auth login
@@ -46,23 +48,23 @@ bedrock auth default info
 bedrock auth default set <gamertag>
 
 bedrock profile list
-bedrock profile create <nome> [--version <versão|uuid|latest_release|latest_preview>]
-bedrock profile delete <nome|uuid>
-bedrock profile <nome|uuid> delete
-bedrock profile <nome|uuid> info
-bedrock profile <nome|uuid> launch
-bedrock profile <nome|uuid> env list
-bedrock profile <nome|uuid> env set <chave> <valor>
-bedrock profile <nome|uuid> env unset <chave>
-bedrock profile <nome|uuid> prelaunch|wrapper|args info
-bedrock profile <nome|uuid> prelaunch|wrapper|args set -- <argumentos...>
-bedrock profile <nome|uuid> prelaunch|wrapper|args clear
-bedrock profile <nome|uuid> account info
-bedrock profile <nome|uuid> account set <gamertag>
-bedrock profile <nome|uuid> version info
-bedrock profile <nome|uuid> version set <versão|uuid|latest_release|latest_preview>
-bedrock profile <nome|uuid> prefix info
-bedrock profile <nome|uuid> prefix set <prefixo>
+bedrock profile create <name> [--version <version|uuid|latest_release|latest_preview>]
+bedrock profile delete <name|uuid>
+bedrock profile <name|uuid> delete
+bedrock profile <name|uuid> info
+bedrock profile <name|uuid> launch
+bedrock profile <name|uuid> env list
+bedrock profile <name|uuid> env set <key> <value>
+bedrock profile <name|uuid> env unset <key>
+bedrock profile <name|uuid> prelaunch|wrapper|args info
+bedrock profile <name|uuid> prelaunch|wrapper|args set -- <arguments...>
+bedrock profile <name|uuid> prelaunch|wrapper|args clear
+bedrock profile <name|uuid> account info
+bedrock profile <name|uuid> account set <gamertag>
+bedrock profile <name|uuid> version info
+bedrock profile <name|uuid> version set <version|uuid|latest_release|latest_preview>
+bedrock profile <name|uuid> prefix info
+bedrock profile <name|uuid> prefix set <prefix>
 bedrock prefix list
 
 bedrock services list
@@ -72,31 +74,31 @@ bedrock services ciks <gamertag>
 bedrock services kill <gamertag>
 
 bedrock version list
-bedrock version <versão|uuid> info [--package]
-bedrock version <versão> download [--copy]
+bedrock version <version|uuid> info [--package]
+bedrock version <version> download [--copy]
 
-bedrock env COM_MOJANG set <nome|uuid>
+bedrock env COM_MOJANG set <name|uuid>
 ```
 
-O login fica salvo assim que o Xodus confirma a conta. Se a consulta do gamertag falhar, use o UUID listado ou o nome Microsoft. `bedrock auth refresh` tenta obter o gamertag novamente.
+Once Xodus confirms the account, the CLI saves the login. If the gamertag lookup fails, select the account by its listed UUID or Microsoft account name. Run `bedrock auth refresh` to retry the lookup.
 
-Os comandos de perfil exigem login. O primeiro uso cria `release` e `preview`. Cada perfil guarda o UUID da conta padrão vigente na criação. Um perfil recém-criado sem versão precisa de `version set` antes de jogar. Os nomes e gamertags servem para seleção interativa. As referências salvas usam UUID.
+Profile commands require a signed-in account. The first use creates the `release` and `preview` profiles. Each profile stores the UUID of the default account at the time of creation. If you create a profile without a version, use `version set` before launching. You can select profiles and accounts by name or gamertag on the command line. Saved references use UUIDs.
 
-Com `--version latest_release` ou `--version latest_preview`, o perfil consulta o canal a cada lançamento e instala a versão compartilhada se necessário. Se o catálogo estiver offline, ele pode usar a instalação já resolvida. Use `version set` com um número ou UUID para voltar a fixar a versão.
+With `--version latest_release` or `--version latest_preview`, the profile checks its channel at each launch and installs the shared copy if needed. When the catalog is offline, the profile can launch its previously resolved installation. Use `version set` with a version number or installation UUID to pin a version again.
 
-O catálogo é o [minecraft-windows-gdk-version-db](https://github.com/LukasPAH/minecraft-windows-gdk-version-db). Uma instalação compartilhada é selecionada por número de versão. Repetir o download pede confirmação e preserva o UUID. Com `--copy`, cada download recebe outro UUID. Um download interrompido pode deixar uma pasta oculta de staging e preserva a instalação publicada.
+A version number selects the shared installation. Downloading it again asks for confirmation and keeps the same UUID. Each download with `--copy` gets a new UUID. An interrupted download can leave a hidden staging directory while preserving the previous installation. [Version catalog](https://github.com/LukasPAH/minecraft-windows-gdk-version-db)
 
-Por exemplo, `bedrock profile servidor env set MANGOHUD 1` e `bedrock profile servidor wrapper set -- gamemoderun` aplicam essas opções ao lançar esse perfil. `prelaunch` executa um comando na pasta do perfil antes da partida; se falhar, o lançamento para. `args` passa argumentos individuais ao Minecraft. Use aspas do shell para preservar espaços. Os comandos recebem `BEDROCK_PROFILE_DIR`, `BEDROCK_GAME_DIR` e o ambiente configurado no perfil.
+For example, `bedrock profile survival env set MANGOHUD 1` sets an environment variable for that profile and `bedrock profile survival wrapper set -- gamemoderun` runs its launch command through GameMode. A `prelaunch` command runs in the profile directory and must succeed for launch to continue. Use `args` to pass individual arguments to Minecraft and shell quotes to preserve spaces. Commands receive `BEDROCK_PROFILE_DIR`, `BEDROCK_GAME_DIR` and the profile's environment.
 
-A exclusão de um perfil pede `y` e depois o nome exato. Ela remove os mundos, packs e configurações particulares do perfil. Os perfis iniciais também podem ser excluídos.
+Deleting a profile asks you to enter `y` and then its exact name. This removes that profile's worlds, packs and settings. You can also delete the two initial profiles.
 
-Todos os perfis começam no prefixo `default`. `prefix set` aceita um prefixo existente ou cria um novo pelo nome. Os dados de cada perfil ficam separados mesmo quando dois perfis usam o mesmo prefixo. A listagem indica disponibilidade em texto e usa verde/vermelho em um terminal com cores. O prefixo é bloqueado durante a partida. Falhas de lançamento também geram uma notificação no desktop.
+All profiles start with the `default` Wine prefix. Use `prefix set` to select an existing prefix or create one by name. Each profile has its own game data even when several profiles share a prefix. A running game locks its prefix. The profile list shows availability in text and uses green and red on color terminals. Launch failures also trigger a desktop notification.
 
-Cada login usa um diretório privado do Xodus. O serviço systemd de usuário daquela conta sobe sob demanda. `services kill` pede confirmação se o serviço está em uso. `services ciks` solicita ao Xodus as chaves licenciadas dos conteúdos Bedrock instalados e as imprime na saída padrão.
+Each login has a private Xodus directory. The account's systemd user service starts on demand. The `services kill` command asks for confirmation if the service is in use. The `services ciks` command asks Xodus for the licensed content keys for installed Bedrock packages and prints them to standard output.
 
-## Arquivos
+## Files
 
-A raiz padrão é `~/.config/bedrockoverlinux`, respeitando `XDG_CONFIG_HOME`.
+The default configuration directory is `~/.config/bedrockoverlinux`. The CLI respects `XDG_CONFIG_HOME`.
 
 ```text
 profiles/<uuid>.json
@@ -107,13 +109,13 @@ versions/client/<uuid>/installation.json
 versions/client/<uuid>/game/
 accounts/<uuid>.json
 xodus/<uuid>/
-tools/<ferramenta>/<tag>/
+tools/<tool>/<tag>/
 ```
 
-`bedrock env COM_MOJANG set <perfil>` grava o caminho absoluto de `Shared/games/com.mojang` em `/etc/environment` com sudo e pede confirmação para substituir um valor existente. A configuração é da máquina e vale para shells que herdam o ambiente de uma nova sessão de login que lê esse arquivo. Sessões já abertas mantêm sua cópia, e o acesso aos mundos continua sujeito às permissões de arquivos do perfil.
+`bedrock env COM_MOJANG set <profile>` writes the absolute path of the profile's `Shared/games/com.mojang` directory to `/etc/environment` using sudo. It asks before replacing an existing value. This machine-wide setting takes effect in shells started from a new login session that reads the file. Existing sessions keep their environment, and access to worlds follows the profile's filesystem permissions.
 
-## Testes
+## Tests
 
-Depois da compilação, `bash tests/cli.sh build/bedrock` testa o CLI offline, inclusive a criação simultânea de perfis, a exclusão com confirmação e argumentos com espaços.
+After building, run `bash tests/cli.sh build/bedrock` for offline CLI tests covering concurrent profile creation, deletion confirmation and arguments containing spaces.
 
-Execute `bash tests/integration.sh build/bedrock` numa sessão com systemd de usuário, Perl e jq. O teste usa armazenamento temporário, contas fictícias e um serviço de teste em um socket Unix. A validação de login, compra e jogo reais exige uma conta dona de Minecraft for Windows.
+Run `bash tests/integration.sh build/bedrock` in a session with a systemd user manager, Perl and jq. The suite uses temporary storage, test accounts and a test service on a Unix socket. Testing real sign-in, ownership and gameplay requires an account that owns Minecraft for Windows.
