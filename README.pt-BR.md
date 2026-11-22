@@ -124,6 +124,20 @@ mkdir -p "$__fish_config_dir/completions"
 bedrock completion fish > "$__fish_config_dir/completions/bedrock.fish"
 ```
 
+## Importar conteúdo
+
+Com o perfil fechado, dá para instalar packs, add-ons, mundos e modelos de mundo sem iniciar o Minecraft. Os packs vão para a pasta compartilhada do perfil. Mundos e modelos ficam na pasta numérica do jogador. Abra o perfil no jogo uma vez para criar essa pasta. Se houver mais de uma, use `--player <pasta>` na importação pelo perfil. Um pack já instalado no mesmo destino e com o mesmo UUID é preservado.
+
+```sh
+bedrock profile release import "./Meu pack.mcpack"
+bedrock profile release import "./Meu pack.mcpack" --in-game
+bedrock profile preview import "./Meu mundo.mcworld" --player 123456789
+bedrock import default set release
+bedrock import default info
+```
+
+Definir o padrão registra a associação de `.mcpack`, `.mcaddon`, `.mcworld` e `.mctemplate` no desktop do seu usuário. O duplo clique inicia o perfil escolhido e entrega o arquivo ao importador do próprio Minecraft. Use `--in-game` para fazer o mesmo no terminal. O prefixo Wine do perfil precisa estar livre. O atalho preserva o diretório de configuração XDG usado ao registrar a associação, e o UUID do perfil fica em `bedrockoverlinux/import.json`.
+
 ## Arquivos
 
 A raiz padrão é `~/.config/bedrockoverlinux`, respeitando `XDG_CONFIG_HOME`.

@@ -60,6 +60,7 @@ install-owned)
     truncate -s 560 "$4/.xodus-streaming.msixvc"
     printf msft-xvd | dd of="$4/.xodus-streaming.msixvc" bs=1 seek=512 conv=notrunc status=none;;
 run)
+    if test -n "${BEDROCK_GAME_IMPORT_FILE:-}"; then printf '%s\n' "$@" > "$XDG_CONFIG_HOME/game-import-args"; fi
     if test -n "${WINEGDK_BEDROCK_DATA_DIR:-}"; then
         test "$WINEGDK_BEDROCK_DATA_DIR" = "$BEDROCK_PROFILE_DIR"
         touch "$WINEGDK_BEDROCK_DATA_DIR/native-run"
@@ -89,6 +90,8 @@ SH
 cat > "$BEDROCK_WINE" <<'SH'
 #!/bin/sh
 mkdir -p "$WINEPREFIX/drive_c/users/$(id -un)/AppData/Roaming"
+mkdir -p "$WINEPREFIX/dosdevices"
+ln -sfn / "$WINEPREFIX/dosdevices/z:"
 touch "$WINEPREFIX/system.reg"
 SH
 cat > "$scratch/wineserver" <<'SH'
@@ -201,6 +204,10 @@ if "$cli" profile first env set WINEPREFIX /tmp; then exit 1; fi
 if "$cli" profile first launch; then exit 1; fi
 "$cli" profile first prelaunch set -- touch prelaunch-ran
 "$cli" profile first launch
+file="$scratch/"'map $HOME.mcworld'
+touch "$file"
+"$cli" profile first import "$file" --in-game
+test "$(tail -1 "$XDG_CONFIG_HOME/game-import-args")" = "Z:$(tr '/' '\\' <<< "$file")"
 "$cli" profile first env set QA_TAIL 'after command'
 "$cli" profile first wrapper set -- "$scratch/wrap" '%command%' 'after command'
 "$cli" profile first launch

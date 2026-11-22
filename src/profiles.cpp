@@ -349,7 +349,16 @@ void worker(const std::string &selector) {
     env["WINEGDK_BEDROCK_DATA_DIR"] = native ? data.string() : "";
     env["BEDROCK_PROFILE_DIR"] = data.string();
     env["BEDROCK_GAME_DIR"] = game.string();
-    const auto arguments = p.value("args", Args{});
+    auto arguments = p.value("args", Args{});
+    if (const auto *file = getenv("BEDROCK_GAME_IMPORT_FILE"); file && *file) {
+        // Wine creates the Z: mapping to / when it initializes a standard prefix.
+        const auto drive = dir / "dosdevices/z:";
+        if (fs::exists(dir / "system.reg") && (!fs::exists(drive) || !fs::equivalent(drive, "/")))
+            throw std::runtime_error("in-game imports require the Wine prefix Z: drive to map to /");
+        std::string windows_path = "Z:" + std::string(file);
+        std::replace(windows_path.begin(), windows_path.end(), '/', '\\');
+        arguments.push_back(windows_path);
+    }
     if (!arguments.empty()) {
         run.push_back("--");
         run.insert(run.end(), arguments.begin(), arguments.end());
@@ -406,6 +415,9 @@ void profile_command(const std::string &action, const std::string &selector, con
             std::string reply;
             if (std::getline(std::cin, reply) && reply == name) {
                 Lock metadata(root() / "locks/metadata");
+                const auto import_config = root() / "import.json";
+                if (fs::exists(import_config) && read_json(import_config).at("profile") == uuid)
+                    fs::remove(import_config);
                 auto pending = record.parent_path() / (uuid + ".deleting");
                 fs::rename(record, pending);
                 fs::remove_all(data);
@@ -525,6 +537,7 @@ void profile_command(const std::string &action, const std::string &selector, con
         if (auto val = getenv(key))
             launch.push_back("--setenv=" + std::string(key) + "=" + val);
     }
+    launch.push_back("--setenv=BEDROCK_GAME_IMPORT_FILE=" + value);
     launch.insert(launch.end(), {fs::read_symlink("/proc/self/exe").string(), "_run", id(profile)});
     checked(launch);
 }
@@ -624,7 +637,7 @@ bool managed_shortcut(const fs::path &path, const std::string &uuid) {
     bool matches_profile = false, matches_config = false;
     while (std::getline(file, line)) {
         if (line == "X-BedrockOverLinux-Profile=" + uuid) matches_profile = true;
-        if (line.starts_with(exec_prefix)) matches_config = true;
+        if (line.compare(0, exec_prefix.size(), exec_prefix) == 0) matches_config = true;
     }
     return matches_profile && matches_config;
 }
@@ -770,4 +783,61 @@ void shortcut_command(const std::string &action, const std::string &selector) {
     } else if (action == "info" && exists) {
         std::cout << path.string() << '\n' << std::ifstream(path).rdbuf();
     } else throw std::runtime_error("shortcut not installed: " + path.string());
+}
+
+void import_default(const std::string &selector) {
+    Lock lock(root() / "locks/metadata");
+    const auto config = root() / "import.json";
+    const auto profiles = initialize(default_account());
+    if (selector.empty()) {
+        if (!fs::exists(config)) throw std::runtime_error("choose a profile with bedrock import default set");
+        auto p = lookup(profiles, read_json(config).at("profile"));
+        std::cout << p.at("name").get<std::string>() << ' ' << id(p) << '\n';
+        return;
+    }
+
+    const auto profile = lookup(profiles, selector);
+    const auto apps = applications_directory();
+    const auto mime = apps.parent_path() / "mime";
+    const std::string desktop = "bedrockoverlinux-import.desktop";
+    std::string types, xml = "<mime-info xmlns=\"http://www.freedesktop.org/standards/shared-mime-info\">\n";
+    Args associate{"xdg-mime", "default", desktop};
+    for (const auto &ext : import_extensions) {
+        std::string type = "application/x-bedrockoverlinux-" + ext.substr(1);
+        xml += "<mime-type type=\"" + type + "\"><comment>Minecraft " + ext +
+               "</comment><sub-class-of type=\"application/zip\"/><glob pattern=\"*" + ext + "\"/></mime-type>\n";
+        types += type + ";";
+        associate.push_back(type);
+    }
+    write_file(mime / "packages/bedrockoverlinux-import.xml", xml + "</mime-info>\n");
+    write_file(apps / desktop, "[Desktop Entry]\nType=Application\nName=Import into Minecraft Bedrock\n"
+        "NoDisplay=true\nTerminal=false\nExec=/usr/bin/env " + desktop_argument("XDG_CONFIG_HOME=" + root().parent_path().string()) +
+        " " + desktop_argument(fs::read_symlink("/proc/self/exe").string()) + " import open -- %f\nMimeType=" + types + "\n");
+    checked({"update-mime-database", mime.string()});
+    checked({"update-desktop-database", apps.string()});
+    checked(associate);
+    save(config, {{"profile", id(profile)}});
+    std::cout << "Double-click imports use " << profile.at("name").get<std::string>() << '\n';
+}
+
+void import_content(const std::string &selector, const fs::path &file, const std::string &player, bool in_game) {
+    Json p;
+    {
+        Lock lock(root() / "locks/metadata");
+        const auto config = root() / "import.json";
+        if (selector.empty() && !fs::exists(config)) throw std::runtime_error("choose a profile with bedrock import default set");
+        p = lookup(initialize(default_account()), selector.empty() ? read_json(config).at("profile").get<std::string>() : selector);
+    }
+    const auto ext = file.extension().string();
+    if (std::none_of(import_extensions.begin(), import_extensions.end(),
+                     [&](const auto &supported) { return strcasecmp(ext.c_str(), supported.c_str()) == 0; }))
+        throw std::runtime_error("expected .mcpack, .mcaddon, .mcworld or .mctemplate");
+    if (!fs::is_regular_file(file)) throw std::runtime_error("missing content file: " + file.string());
+    if (in_game) {
+        profile_command("launch", id(p), fs::absolute(file).lexically_normal().string());
+        return;
+    }
+    Lock lease(root() / "locks" / (id(p) + ".profile"), false, false);
+    if (!fs::exists(record_path("profiles", id(p)))) throw std::runtime_error("profile was deleted");
+    install_content(root() / "profiles" / id(p), file, player);
 }

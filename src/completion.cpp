@@ -44,6 +44,7 @@ void commands(const CLI::App &app, const std::string &path) {
         else if (path == " profile @profile prefix set") values = "prefixes";
         if (!values.empty())
             std::cout << "complete -c bedrock -f -n " << condition << " -a '(bedrock _complete " << values << " 2>/dev/null)'\n";
+        if (name == "file") std::cout << "complete -c bedrock -F -n " << condition << '\n';
         if (name == "tool") std::cout << "complete -c bedrock -f -n " << condition << " -a 'xodus winegdk xvdtool'\n";
     }
 }

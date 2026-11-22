@@ -124,6 +124,20 @@ mkdir -p "$__fish_config_dir/completions"
 bedrock completion fish > "$__fish_config_dir/completions/bedrock.fish"
 ```
 
+## Import content
+
+Import a pack, add-on, world or world template into a profile while the profile is closed. The command reads the package and installs its contents without starting Minecraft. Packs go into the profile’s shared storage. Worlds and world templates use its numeric player folder. Launch the profile once to create that folder. If several exist, pass `--player <folder>` on the profile import command. Existing pack installations with the same destination UUID are preserved.
+
+```sh
+bedrock profile release import "./My pack.mcpack"
+bedrock profile release import "./My pack.mcpack" --in-game
+bedrock profile preview import "./My world.mcworld" --player 123456789
+bedrock import default set release
+bedrock import default info
+```
+
+Setting the default registers a desktop file association for `.mcpack`, `.mcaddon`, `.mcworld` and `.mctemplate` for your user. Double-clicking launches the selected profile and passes the file to Minecraft’s built-in importer. Use `--in-game` for the same behavior on a profile import. The profile’s Wine prefix must be available. The handler remembers the active XDG configuration directory and stores the profile UUID in `bedrockoverlinux/import.json`.
+
 ## Files
 
 The default configuration directory is `~/.config/bedrockoverlinux`. The CLI respects `XDG_CONFIG_HOME`.

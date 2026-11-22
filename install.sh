@@ -22,12 +22,12 @@ admin() {
 source /etc/os-release
 case " $ID ${ID_LIKE:-} " in
     *' arch '*)
-        deps=(gcc cmake make cli11 nlohmann-json pugixml)
+        deps=(gcc cmake make cli11 nlohmann-json pugixml libarchive shared-mime-info desktop-file-utils xdg-utils)
         if ! pacman -T "${deps[@]}" >/dev/null; then
             admin /usr/bin/pacman -S --needed --noconfirm "${deps[@]}"
         fi ;;
     *' debian '*|*' ubuntu '*)
-        deps=(g++ cmake make libcli11-dev nlohmann-json3-dev libpugixml-dev ca-certificates)
+        deps=(g++ cmake make libcli11-dev nlohmann-json3-dev libpugixml-dev libarchive-dev shared-mime-info desktop-file-utils xdg-utils ca-certificates)
         missing=()
         for pkg in "${deps[@]}"; do
             if [[ $(dpkg-query -W -f='${db:Status-Status}' "$pkg" 2>/dev/null || :) != installed ]]; then missing+=("$pkg"); fi
@@ -37,7 +37,7 @@ case " $ID ${ID_LIKE:-} " in
             admin /usr/bin/apt-get install -y --no-install-recommends "${missing[@]}"
         fi ;;
     *' fedora '*|*' rhel '*)
-        deps=(gcc-c++ cmake make cli11-devel json-devel pugixml-devel)
+        deps=(gcc-c++ cmake make cli11-devel json-devel pugixml-devel libarchive-devel shared-mime-info desktop-file-utils xdg-utils)
         if ! rpm -q "${deps[@]}" >/dev/null; then admin /usr/bin/dnf install -y "${deps[@]}"; fi ;;
 esac
 

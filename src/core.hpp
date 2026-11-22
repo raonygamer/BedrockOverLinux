@@ -56,4 +56,8 @@ void env_command(const std::string &);
 void install_dependencies(const std::string &tool);
 void profile_startup(const std::string &selector, const std::string &setting, const std::string &action, const Args &values);
 Env xvdtool_environment();
+void import_content(const std::string &selector, const fs::path &file, const std::string &player, bool in_game);
+void import_default(const std::string &selector);
 void shortcut_command(const std::string &action, const std::string &selector);
+extern const Args import_extensions;
+void install_content(const fs::path &profile_dir, const fs::path &file, const std::string &player);

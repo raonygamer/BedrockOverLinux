@@ -8,8 +8,8 @@ int main(int argc, char **argv) {
     umask(0077);
     CLI::App app{"Minecraft Bedrock on Linux", "bedrock"};
     std::string selector, value, tool;
-    bool copy = false, notify = false, package_info = false;
-    std::string parsed_selector;
+    bool in_game = false, copy = false, notify = false, package_info = false;
+    std::string parsed_selector, player;
     Args startup_values;
     std::string env_key, env_value;
     std::function<void()> action;
@@ -56,6 +56,21 @@ int main(int argc, char **argv) {
             ->add_option("value", value, key == "version" ? "Version number, UUID, latest_release or latest_preview" : "")
             ->required();
     }
+    auto import = leaf(target, "import", "Install a Bedrock content file in this profile", [&] {
+        import_content(selector, value, player, in_game);
+    });
+    import->add_option("file", value)->required();
+    auto native = import->add_flag("--in-game", in_game, "Launch Minecraft and use its built-in importer");
+    import->add_option("--player", player, "Numeric game storage folder for worlds and world templates")->excludes(native);
+    auto imports = group(&app, "import", "Open Bedrock content files");
+    auto defaults = group(imports, "default", "Double-click import profile");
+    leaf(defaults, "set", "Register the desktop handler and choose its profile", [&] { import_default(selector); })
+        ->add_option("profile", selector)->required();
+    leaf(defaults, "info", "Show the configured import profile", [] { import_default(""); });
+    leaf(imports, "open", "Import a file using the double-click profile", [&] {
+        notify = true;
+        import_content("", value, "", true);
+    })->add_option("file", value)->required();
     auto variables = group(target, "env", "Environment for this profile");
     leaf(variables, "list", "Show configured variables", [&] { profile_startup(selector, "env", "list", {}); });
     auto assign = leaf(variables, "set", "Set one variable", [&] {
