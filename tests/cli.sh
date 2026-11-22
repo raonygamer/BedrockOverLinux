@@ -63,12 +63,33 @@ ok=0
 for pid in "${pids[@]}"; do if wait "$pid"; then ok=$((ok+1)); fi; done
 test "$ok" = 1
 mkdir -p "$root/profiles/$id"
+export XDG_DATA_HOME="$scratch/data with spaces"
+"$cli" shortcut list | grep -Fx 'No profile shortcuts.'
+desktop=$("$cli" shortcut add Example)
+test "$desktop" = "$XDG_DATA_HOME/applications/bedrockoverlinux-$id.desktop"
+"$cli" shortcut add "$id" | grep -Fx "$desktop"
+"$cli" shortcut info Example | grep -F "profile $id launch"
+"$cli" shortcut list | grep -F "Example $id"
+if command -v desktop-file-validate >/dev/null; then desktop-file-validate "$desktop"; fi
+"$cli" shortcut delete Example
+test -e "$root/profiles/$id.json"
+reject "$cli" shortcut info Example
+printf 'unrelated' > "$desktop"
+reject "$cli" shortcut add Example
+reject "$cli" shortcut delete "$id"
+test "$(cat "$desktop")" = unrelated
+unlink "$desktop"
+"$cli" shortcut add Example > /dev/null
 touch "$scratch/keep"
 ln -s "$scratch/keep" "$root/profiles/$id/link"
 "$cli" profile delete Example < /dev/null
 test -f "$root/profiles/$id.json"
 printf 'y\nExample\n' | "$cli" profile delete "$id"
 test ! -e "$root/profiles/$id.json" && test -f "$scratch/keep"
+
+"$cli" shortcut list | grep -F "(missing profile) $id"
+"$cli" shortcut delete "$id"
+test ! -e "$desktop"
 
 # Recover a deletion interrupted between hiding the record and removing its data.
 rid=$("$cli" profile create recovery)

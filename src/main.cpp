@@ -75,6 +75,14 @@ int main(int argc, char **argv) {
             if (action == "set") cmd->add_option("argv", startup_values, "Literal arguments; use -- before flags")->required();
         }
     }
+    auto shortcuts = group(&app, "shortcut", "Application menu shortcuts for profiles");
+    leaf(shortcuts, "list", "List installed profile shortcuts", [] { shortcut_command("list", ""); });
+    for (const auto &[op, description] : std::map<std::string, std::string>{
+             {"add", "Install or refresh a profile shortcut"}, {"info", "Show the desktop entry and its path"},
+             {"delete", "Remove a profile shortcut"}}) {
+        auto cmd = leaf(shortcuts, op, description, [&, operation = op] { shortcut_command(operation, selector); });
+        cmd->add_option("name_or_uuid", selector)->required();
+    }
     auto prefixes = group(&app, "prefix", "Wine prefixes");
     leaf(prefixes, "list", "List prefixes and active profiles", [] { profile_command("prefix list", "", ""); });
     auto auth = group(&app, "auth", "Microsoft accounts");

@@ -67,6 +67,11 @@ bedrock profile <name|uuid> prefix info
 bedrock profile <name|uuid> prefix set <prefix>
 bedrock prefix list
 
+bedrock shortcut add <name|uuid>
+bedrock shortcut info <name|uuid>
+bedrock shortcut delete <name|uuid>
+bedrock shortcut list
+
 bedrock services list
 bedrock services info <gamertag>
 bedrock services licence <gamertag>
@@ -95,6 +100,8 @@ Deleting a profile asks you to enter `y` and then its exact name. This removes t
 All profiles start with the `default` Wine prefix. Use `prefix set` to select an existing prefix or create one by name. Each profile has its own game data even when several profiles share a prefix. A running game locks its prefix. The profile list shows availability in text and uses green and red on color terminals. Launch failures also trigger a desktop notification.
 
 Each login has a private Xodus directory. The account's systemd user service starts on demand. The `services kill` command asks for confirmation if the service is in use. The `services ciks` command asks Xodus for the licensed content keys for installed Bedrock packages and prints them to standard output.
+
+Run `bedrock shortcut add release` to add **Minecraft Bedrock - release** to your application menu. The desktop entry launches the profile by UUID without opening a terminal. It lives in `$XDG_DATA_HOME/applications` (default `~/.local/share/applications`) for your desktop user. Run `add` again after moving the CLI to refresh its path. If you already deleted the profile, use the UUID from `shortcut list` to remove its shortcut.
 
 ## Files
 

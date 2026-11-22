@@ -67,6 +67,11 @@ bedrock profile <nome|uuid> prefix info
 bedrock profile <nome|uuid> prefix set <prefixo>
 bedrock prefix list
 
+bedrock shortcut add <nome|uuid>
+bedrock shortcut info <nome|uuid>
+bedrock shortcut delete <nome|uuid>
+bedrock shortcut list
+
 bedrock services list
 bedrock services info <gamertag>
 bedrock services licence <gamertag>
@@ -95,6 +100,8 @@ A exclusão de um perfil pede `y` e depois o nome exato. Ela remove os mundos, p
 Todos os perfis começam no prefixo `default`. `prefix set` aceita um prefixo existente ou cria um novo pelo nome. Os dados de cada perfil ficam separados mesmo quando dois perfis usam o mesmo prefixo. A listagem indica disponibilidade em texto e usa verde/vermelho em um terminal com cores. O prefixo é bloqueado durante a partida. Falhas de lançamento também geram uma notificação no desktop.
 
 Cada login usa um diretório privado do Xodus. O serviço systemd de usuário daquela conta sobe sob demanda. `services kill` pede confirmação se o serviço está em uso. `services ciks` solicita ao Xodus as chaves licenciadas dos conteúdos Bedrock instalados e as imprime na saída padrão.
+
+Use `bedrock shortcut add release` para adicionar **Minecraft Bedrock - release** ao menu de aplicativos. O atalho inicia o perfil pelo UUID sem abrir um terminal e fica em `$XDG_DATA_HOME/applications` (por padrão, `~/.local/share/applications`) para o seu usuário. Se mover o CLI, repita `add` para atualizar o caminho. Se já excluiu o perfil, use o UUID de `shortcut list` para remover o atalho.
 
 ## Arquivos
 

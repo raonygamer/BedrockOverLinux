@@ -54,3 +54,4 @@ void env_command(const std::string &);
 void install_dependencies(const std::string &tool);
 void profile_startup(const std::string &selector, const std::string &setting, const std::string &action, const Args &values);
 Env xvdtool_environment();
+void shortcut_command(const std::string &action, const std::string &selector);

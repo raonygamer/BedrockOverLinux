@@ -457,3 +457,88 @@ mv -fT "$tmp" "$file"
     checked(cmd);
     std::cout << "COM_MOJANG=" << path.string() << " (new login sessions)\n";
 }
+
+namespace {
+fs::path applications_directory() {
+    const char *base = getenv("XDG_DATA_HOME");
+    if (base && fs::path(base).is_absolute()) return fs::path(base) / "applications";
+    const char *home = getenv("HOME");
+    if (!home || !fs::path(home).is_absolute()) throw std::runtime_error("HOME unavailable");
+    return fs::path(home) / ".local/share/applications";
+}
+
+std::string desktop_argument(const std::string &value) {
+    // Desktop entries unescape string values first, then parse the quoted Exec arguments.
+    std::string quoted = "\"";
+    for (char c : value) {
+        if (c == '\\') quoted += "\\\\\\\\";
+        else if (c == '"' || c == '$' || c == '`') { quoted += "\\\\"; quoted += c; }
+        else if (c == '%') quoted += "%%";
+        else if (static_cast<unsigned char>(c) < 32) throw std::runtime_error("control character in launcher path");
+        else quoted += c;
+    }
+    return quoted + '"';
+}
+
+bool managed_shortcut(const fs::path &path, const std::string &uuid) {
+    if (!fs::is_regular_file(fs::symlink_status(path))) return false;
+    std::ifstream file(path);
+    std::string line;
+    while (std::getline(file, line))
+        if (line == "X-BedrockOverLinux-Profile=" + uuid) return true;
+    return false;
+}
+}
+
+void shortcut_command(const std::string &action, const std::string &selector) {
+    Lock lock(root() / "locks/metadata");
+    const auto directory = applications_directory();
+    const std::string prefix = "bedrockoverlinux-";
+    if (action == "list") {
+        std::vector<std::string> shortcuts;
+        if (fs::exists(directory)) {
+            for (const auto &entry : fs::directory_iterator(directory)) {
+                const auto stem = entry.path().stem().string();
+                if (entry.path().extension() != ".desktop" || stem.rfind(prefix, 0) != 0) continue;
+                const auto uuid = stem.substr(prefix.size());
+                if (!is_uuid(uuid) || !managed_shortcut(entry.path(), uuid)) continue;
+                const auto profile = record_path("profiles", uuid);
+                auto name = fs::exists(profile) ? read_json(profile).at("name").get<std::string>() : "(missing profile)";
+                shortcuts.push_back(name + " " + uuid + " " + entry.path().string());
+            }
+        }
+        std::sort(shortcuts.begin(), shortcuts.end());
+        for (const auto &line : shortcuts) std::cout << line << '\n';
+        if (shortcuts.empty()) std::cout << "No profile shortcuts.\n";
+        return;
+    }
+    std::string uuid = selector, name;
+    if (action == "add" || !is_uuid(selector)) {
+        if (action == "add") initialize(default_account());
+        auto profile = lookup(records("profiles"), selector);
+        uuid = id(profile);
+        name = profile.at("name");
+    }
+    const auto path = directory / (prefix + uuid + ".desktop");
+    const bool exists = fs::exists(fs::symlink_status(path));
+    if (exists && !managed_shortcut(path, uuid))
+        throw std::runtime_error("unmanaged shortcut: " + path.string());
+    if (action == "add") {
+        valid_name(name);
+        auto binary = fs::read_symlink("/proc/self/exe").string();
+        auto command = "/usr/bin/env " + desktop_argument("XDG_CONFIG_HOME=" + root().parent_path().string())
+                     + " " + desktop_argument(binary) + " profile " + uuid + " launch";
+        write_file(path, "[Desktop Entry]\nType=Application\nName=Minecraft Bedrock - " + name
+                   + "\nExec=" + command + "\nIcon=applications-games\nTerminal=false\nCategories=Game;\n"
+                   + "X-BedrockOverLinux-Profile=" + uuid + "\n");
+        std::cout << path.string() << '\n';
+        return;
+    }
+    if (!exists) throw std::runtime_error("shortcut not installed: " + path.string());
+    if (action == "info") {
+        std::cout << path.string() << '\n' << std::ifstream(path).rdbuf();
+    } else {
+        fs::remove(path);
+        std::cout << "Deleted " << path.string() << '\n';
+    }
+}
