@@ -8,7 +8,11 @@ export BEDROCK_XODUS_CLI="$scratch/xodus-cli" BEDROCK_XODUS_SERVICE="$scratch/xo
 export BEDROCK_WINE="$scratch/wine"
 cleanup() {
     for f in "$XDG_CONFIG_HOME"/bedrockoverlinux/accounts/*.json; do
-        if test -f "$f"; then systemctl --user stop "bedrock-xodus-$(basename "$f" .json).service" 2>/dev/null || true; fi
+        if test -f "$f"; then
+            id=$(basename "$f" .json)
+            systemctl --user stop "bedrock-xodus-$id.service" 2>/dev/null || true
+            if test -S "$XDG_RUNTIME_DIR/bol-$id.sock"; then unlink "$XDG_RUNTIME_DIR/bol-$id.sock"; fi
+        fi
     done
     rm -rf "$scratch"
 }
@@ -16,7 +20,8 @@ trap cleanup EXIT
 cat > "$BEDROCK_XODUS_SERVICE" <<'PERL'
 #!/usr/bin/perl
 use IO::Socket::UNIX;
-unlink $ENV{XODUS_SOCKET};
+
+die "address already in use" if -e $ENV{XODUS_SOCKET};
 my $s=IO::Socket::UNIX->new(Type=>SOCK_STREAM,Local=>$ENV{XODUS_SOCKET},Listen=>8) or die $!;
 while (my $c=$s->accept()) {
     if (read($c, my $header, 8) == 8) {
@@ -228,6 +233,30 @@ wait "$second"
 "$cli" services ciks Player | grep -q '0000000000000000$'
 "$cli" services kill Player
 "$cli" services kill Player | grep stopped
+sock="$XDG_RUNTIME_DIR/bol-$before.sock"
+test ! -e "$sock"
+"$cli" services licence Player
+# An external stop bypasses bedrock cleanup, like a crashed daemon.
+systemctl --user stop "bedrock-xodus-$before.service"
+test -S "$sock"
+"$cli" services licence Player
+"$cli" services info Player | grep running
+"$cli" services kill Player
+test ! -e "$sock"
+printf 'keep' > "$sock"
+if "$cli" services licence Player >"$scratch/socket-error" 2>&1; then exit 1; fi
+grep -F 'unexpected entry' "$scratch/socket-error"
+test "$(cat "$sock")" = keep
+unlink "$sock"
+# A live listener outside the unit retains its socket.
+perl -MIO::Socket::UNIX -e 'my $s=IO::Socket::UNIX->new(Type=>SOCK_STREAM,Local=>$ARGV[0],Listen=>1) or die $!; alarm 10; $s->accept or die $!;' "$sock" &
+listener=$!
+for _ in {1..100}; do test -S "$sock" && break; sleep .02; done
+if "$cli" services licence Player >"$scratch/socket-error" 2>&1; then exit 1; fi
+grep -F 'another service is listening' "$scratch/socket-error"
+wait "$listener"
+test -S "$sock"
+unlink "$sock"
 target=$("$cli" profile first info | jq -r .uuid)
 data="$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$target"
 touch "$data/world-fixture"

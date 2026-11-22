@@ -6,6 +6,7 @@
 #include <memory>
 #include <pugixml.hpp>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <thread>
 #include <unistd.h>
@@ -14,18 +15,37 @@ namespace {
 std::string unit(const Json &a) { return "bedrock-xodus-" + a.at("uuid").get<std::string>() + ".service"; }
 fs::path usage(const Json &a) { return root() / "locks" / (a.at("uuid").get<std::string>() + ".usage"); }
 fs::path defaults() { return root() / "auth.json"; }
-bool socket_ready(const std::string &path) {
+int socket_connect_error(const std::string &path) {
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     if (path.size() >= sizeof(addr.sun_path))
         throw std::runtime_error("Xodus socket path too long");
     std::memcpy(addr.sun_path, path.c_str(), path.size() + 1);
-    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0)
         throw std::system_error(errno, std::generic_category());
-    bool ready = connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0;
+    int error = connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == 0 ? 0 : errno;
     close(fd);
-    return ready;
+    return error;
+}
+
+// Called under the account lifecycle lock, with the systemd unit stopped.
+void clear_stale_socket(const std::string &path) {
+    struct stat entry{};
+    if (lstat(path.c_str(), &entry) < 0) {
+        if (errno == ENOENT) return;
+        throw std::system_error(errno, std::generic_category(), path);
+    }
+    if (!S_ISSOCK(entry.st_mode) || entry.st_uid != geteuid())
+        throw std::runtime_error("unexpected entry at Xodus socket path: " + path);
+    int error = socket_connect_error(path);
+    if (error == ENOENT) return;
+    if (error == 0)
+        throw std::runtime_error("another service is listening on the Xodus socket: " + path);
+    if (error != ECONNREFUSED)
+        throw std::system_error(error, std::generic_category(), path);
+    if (unlink(path.c_str()) < 0 && errno != ENOENT)
+        throw std::system_error(errno, std::generic_category(), path);
 }
 bool busy(const Json &a) {
     try {
@@ -40,6 +60,7 @@ bool busy(const Json &a) {
 void stop(const Json &a) {
     if (service_running(a))
         checked({"systemctl", "--user", "stop", unit(a)});
+    clear_stale_socket(account_env(a).at("XODUS_SOCKET"));
 }
 bool valid_tag(const std::string &tag) {
     return !tag.empty() && tag.size() <= 128 &&
@@ -173,6 +194,7 @@ void ensure_service(const Json &a) {
         throw std::runtime_error("account signed out");
     auto env = account_env(a);
     if (!service_running(a)) {
+        clear_stale_socket(env.at("XODUS_SOCKET"));
         Args args{"systemd-run", "--user", "--quiet", "--collect", "--service-type=exec", "--unit=" + unit(a)};
         for (auto &[k, v] : env)
             args.push_back("--setenv=" + k + "=" + v);
@@ -180,7 +202,7 @@ void ensure_service(const Json &a) {
         checked(args);
     }
     auto until = std::chrono::steady_clock::now() + std::chrono::minutes(6);
-    for (int tick = 0; !socket_ready(env.at("XODUS_SOCKET")); ++tick) {
+    for (int tick = 0; socket_connect_error(env.at("XODUS_SOCKET")) != 0; ++tick) {
         if ((tick % 10 == 0 && !service_running(a)) || std::chrono::steady_clock::now() > until)
             throw std::runtime_error("Xodus did not become ready; see journalctl --user -u " + unit(a));
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -282,6 +304,7 @@ void services_command(const std::string &action, const std::string &arg) {
     if (action == "kill") {
         Lock gate(root() / "locks" / (a.at("uuid").get<std::string>() + ".service"));
         if (!service_running(a)) {
+            clear_stale_socket(account_env(a).at("XODUS_SOCKET"));
             std::cout << "already stopped\n";
             return;
         }
