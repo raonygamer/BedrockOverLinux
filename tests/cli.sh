@@ -26,6 +26,7 @@ reject "$cli" profile create Example
 "$cli" profile Example env set EQUALS 'a=b'
 reject "$cli" profile Example env set 3invalid value
 reject "$cli" profile Example env set XODUS_SOCKET elsewhere
+reject "$cli" profile Example env set WINEGDK_BEDROCK_DATA_DIR elsewhere
 "$cli" profile Example env list | grep -F '"EMPTY": ""'
 "$cli" profile Example env list | grep -F '"WITH_SPACE": "two words"'
 "$cli" profile Example wrapper set -- env 'WRAPPED=two words'

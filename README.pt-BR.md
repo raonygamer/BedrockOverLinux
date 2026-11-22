@@ -99,7 +99,7 @@ Por exemplo, `bedrock profile servidor env set MANGOHUD 1` e `bedrock profile se
 
 A exclusão de um perfil pede `y` e depois o nome exato. Ela remove os mundos, packs e configurações particulares do perfil. Os perfis iniciais também podem ser excluídos.
 
-Todos os perfis começam no prefixo `default`. `prefix set` aceita um prefixo existente ou cria um novo pelo nome. Os dados de cada perfil ficam separados mesmo quando dois perfis usam o mesmo prefixo. A listagem indica disponibilidade em texto e usa verde/vermelho em um terminal com cores. O prefixo é bloqueado durante a partida. Falhas de lançamento também geram uma notificação no desktop.
+Todos os perfis começam no prefixo `default`. `prefix set` aceita um prefixo existente ou cria um novo pelo nome. Com o WineGDK 11.18-16-winrt, as pastas Minecraft Bedrock e Minecraft Bedrock Preview em Roaming apontam para `profiles/<uuid>/` pela variável de processo `WINEGDK_BEDROCK_DATA_DIR`. Os mundos em `Users/` continuam no mesmo lugar. O `LocalState` do pacote Windows usa o prefixo. A atualização remove os links antigos gerenciados e preserva seus destinos. Runtimes antigos continuam usando links. A listagem indica disponibilidade em texto e usa verde/vermelho em um terminal com cores. O prefixo é bloqueado durante a partida. Falhas de lançamento também geram uma notificação no desktop.
 
 Cada login usa um diretório privado do Xodus. O serviço systemd de usuário daquela conta sobe sob demanda. `services kill` pede confirmação se o serviço está em uso. `services ciks` solicita ao Xodus as chaves licenciadas dos conteúdos Bedrock instalados e as imprime na saída padrão.
 

@@ -155,6 +155,25 @@ public:
         while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
     }
 };
+bool native_profile_mapping(const fs::path &wine) {
+    auto info = fs::canonical(wine).parent_path().parent_path() / "share/wine/wine.inf";
+    std::ifstream input(info);
+    std::string line;
+    return std::getline(input, line) && line == ";; WineGDK capability: bedrock-data-dir-v1";
+}
+
+// Only retire links that an older bedrock build could have created. A link
+// owned by the user needs an explicit migration before changing its meaning.
+bool legacy_storage_link(const fs::path &link) {
+    if (!fs::is_symlink(link)) return false;
+    const auto target = fs::weakly_canonical(link.parent_path() / fs::read_symlink(link));
+    const auto profile = target.parent_path();
+    if (target.filename() != link.filename() || !is_uuid(profile.filename().string()) ||
+        profile.parent_path() != fs::weakly_canonical(root() / "profiles"))
+        throw std::runtime_error("unmanaged storage link: " + link.string());
+    return true;
+}
+
 void bind_storage(const fs::path &source, const fs::path &dest, const fs::path &owner) {
     fs::create_directories(source);
     fs::create_directories(dest.parent_path());
@@ -230,7 +249,7 @@ void profile_startup(const std::string &selector, const std::string &setting, co
         if (!std::regex_match(key, valid_key)) throw std::runtime_error("invalid environment key: " + key);
         if (action == "unset") configured.erase(key);
         else {
-            if (key == "WINEPREFIX" || key == "WINESERVER" || key.rfind("XODUS_", 0) == 0)
+            if (key == "WINEPREFIX" || key == "WINESERVER" || key == "WINEGDK_BEDROCK_DATA_DIR" || key.rfind("XODUS_", 0) == 0)
                 throw std::runtime_error("variable managed by the selected account or prefix: " + key);
             configured[key] = values.at(1);
         }
@@ -285,15 +304,32 @@ void worker(const std::string &selector) {
     bool preview = version.at("channel") == "preview";
     auto data = root() / "profiles" / id(p);
     fs::create_directories(shared(p));
-    bind_storage(data / "Users",
-                 appdata / "Roaming" / (preview ? "Minecraft Bedrock Preview" : "Minecraft Bedrock") / "Users",
-                 root() / "profiles");
-    bind_storage(data / "LocalState",
-                 appdata / "Local/Packages" /
-                     (preview ? "Microsoft.MinecraftWindowsBeta_8wekyb3d8bbwe"
-                              : "Microsoft.MinecraftUWP_8wekyb3d8bbwe") /
-                     "LocalState",
-                 root() / "profiles");
+    auto roaming = appdata / "Roaming";
+    auto local_state = appdata / "Local/Packages" /
+        (preview ? "Microsoft.MinecraftWindowsBeta_8wekyb3d8bbwe" : "Microsoft.MinecraftUWP_8wekyb3d8bbwe") /
+        "LocalState";
+    bool native = native_profile_mapping(wine);
+    if (native) {
+        std::vector<fs::path> legacy_links;
+        for (auto channel : {"Minecraft Bedrock", "Minecraft Bedrock Preview"}) {
+            auto folder = roaming / channel;
+            if (fs::is_symlink(folder)) throw std::runtime_error("unmanaged storage link: " + folder.string());
+            fs::create_directories(folder); // The game directory is visible when enumerating Roaming.
+            auto users = folder / "Users";
+            if (legacy_storage_link(users)) legacy_links.push_back(users);
+            else if (fs::exists(users) && (!fs::is_directory(users) || !fs::is_empty(users)))
+                throw std::runtime_error("existing game data requires manual import: " + users.string());
+        }
+        for (auto package : {"Microsoft.MinecraftUWP_8wekyb3d8bbwe", "Microsoft.MinecraftWindowsBeta_8wekyb3d8bbwe"}) {
+            auto path = appdata / "Local/Packages" / package / "LocalState";
+            if (legacy_storage_link(path)) legacy_links.push_back(path);
+        }
+        for (const auto &path : legacy_links) fs::remove(path);
+    } else {
+        bind_storage(data / "Users", roaming / (preview ? "Minecraft Bedrock Preview" : "Minecraft Bedrock") / "Users",
+                     root() / "profiles");
+        bind_storage(data / "LocalState", local_state, root() / "profiles");
+    }
     auto game = root() / "versions/client" / id(version) / "game";
     auto relative = fs::path(version.at("executable").get<std::string>());
     ensure_game_config((game / relative).parent_path(), version);
@@ -309,6 +345,7 @@ void worker(const std::string &selector) {
     for (const auto &[key, value] : profile_env) {
         if (key != "WINEPREFIX" && key != "WINESERVER" && key.rfind("XODUS_", 0) != 0) env[key] = value;
     }
+    env["WINEGDK_BEDROCK_DATA_DIR"] = native ? data.string() : "";
     env["BEDROCK_PROFILE_DIR"] = data.string();
     env["BEDROCK_GAME_DIR"] = game.string();
     const auto arguments = p.value("args", Args{});

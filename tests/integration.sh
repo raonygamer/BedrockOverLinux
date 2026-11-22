@@ -60,6 +60,10 @@ install-owned)
     truncate -s 560 "$4/.xodus-streaming.msixvc"
     printf msft-xvd | dd of="$4/.xodus-streaming.msixvc" bs=1 seek=512 conv=notrunc status=none;;
 run)
+    if test -n "${WINEGDK_BEDROCK_DATA_DIR:-}"; then
+        test "$WINEGDK_BEDROCK_DATA_DIR" = "$BEDROCK_PROFILE_DIR"
+        touch "$WINEGDK_BEDROCK_DATA_DIR/native-run"
+    fi
     if test -e "$XDG_CONFIG_HOME/reject-run"; then
         for _ in $(seq 1 100); do test -e "$XDG_CONFIG_HOME/warm-started" && exit 1; sleep .02; done
         exit 2
@@ -338,6 +342,13 @@ unlink "$users"
 "$cli" profile second launch
 second_id=$("$cli" profile second info | jq -r .uuid)
 test "$(readlink "$users")" = "$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$second_id/Users"
+mkdir -p "$managed/test/share/wine"
+echo ';; WineGDK capability: bedrock-data-dir-v1' > "$managed/test/share/wine/wine.inf"
+touch "$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$second_id/Users/keep-world"
+(unset BEDROCK_WINE; "$cli" profile second launch)
+test -e "$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$second_id/native-run"
+test -e "$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$second_id/Users/keep-world"
+test ! -L "$users"
 printf 'y\nrelease\n' | "$cli" profile delete release
 if "$cli" profile release info; then exit 1; fi
 "$cli" profile preview info > /dev/null

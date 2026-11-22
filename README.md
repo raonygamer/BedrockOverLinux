@@ -99,7 +99,7 @@ For example, `bedrock profile survival env set MANGOHUD 1` sets an environment v
 
 Deleting a profile asks you to enter `y` and then its exact name. This removes that profile's worlds, packs and settings. You can also delete the two initial profiles.
 
-All profiles start with the `default` Wine prefix. Use `prefix set` to select an existing prefix or create one by name. Each profile has its own game data even when several profiles share a prefix. A running game locks its prefix. The profile list shows availability in text and uses green and red on color terminals. Launch failures also trigger a desktop notification.
+All profiles start with the `default` Wine prefix. Use `prefix set` to select an existing prefix or create one by name. With WineGDK 11.18-16-winrt, both Minecraft Bedrock directories under the Wine user’s Roaming folder resolve to `profiles/<uuid>/` through the process variable `WINEGDK_BEDROCK_DATA_DIR`. Worlds under `Users/` stay in place. Windows package `LocalState` uses the prefix. Upgrading removes the old managed links and preserves their targets. Older runtimes use the legacy links. A running game locks its prefix. The profile list shows availability in text and uses green and red on color terminals. Launch failures also trigger a desktop notification.
 
 Each login has a private Xodus directory. The account's systemd user service starts on demand. The `services kill` command asks for confirmation if the service is in use. The `services ciks` command asks Xodus for the licensed content keys for installed Bedrock packages and prints them to standard output.
 
