@@ -51,7 +51,7 @@ void update_profile_version(Json &profile, const Json &account);
 Json version_resolve(const std::string &);
 void versions_command(const std::string &, const std::string &, bool);
 void profile_command(const std::string &, const std::string &, const std::string &);
-void worker(const std::string &);
+void worker(const std::string &, const std::string &);
 void env_command(const std::string &);
 void install_dependencies(const std::string &tool);
 void profile_startup(const std::string &selector, const std::string &setting, const std::string &action, const Args &values);

@@ -136,7 +136,7 @@ bedrock import default set release
 bedrock import default info
 ```
 
-Definir o padrão registra a associação de `.mcpack`, `.mcaddon`, `.mcworld` e `.mctemplate` no desktop do seu usuário. O duplo clique inicia o perfil escolhido e entrega o arquivo ao importador do próprio Minecraft. Use `--in-game` para fazer o mesmo no terminal. O prefixo Wine do perfil precisa estar livre. O atalho preserva o diretório de configuração XDG usado ao registrar a associação, e o UUID do perfil fica em `bedrockoverlinux/import.json`.
+Definir o padrão registra a associação de `.mcpack`, `.mcaddon`, `.mcworld` e `.mctemplate` no desktop do seu usuário. O duplo clique inicia o perfil escolhido e entrega o arquivo ao importador do próprio Minecraft. Use `--in-game` para fazer o mesmo no terminal. Se o perfil escolhido já estiver aberto, o WineGDK 11.18-17-winrt ou posterior entrega o arquivo ao importador da sessão em execução. Se outro perfil estiver usando o mesmo prefixo, aguarde seu encerramento. Após atualizar, reinicie uma vez o jogo que já estava aberto. O atalho preserva o diretório de configuração XDG usado ao registrar a associação, e o UUID do perfil fica em `bedrockoverlinux/import.json`.
 
 ## Arquivos
 

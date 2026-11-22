@@ -238,6 +238,23 @@ pidfile="$XDG_CONFIG_HOME/bedrockoverlinux/profiles/$profile_id/wrapper.pid"
 caller=$!
 for _ in {1..100}; do test -s "$pidfile" && break; sleep .1; done
 wrapper_pid=$(cat "$pidfile")
+# A running session receives native file opens without starting another worker.
+owner="$XDG_CONFIG_HOME/bedrockoverlinux/locks/$prefix_id.owner"
+inbox="$XDG_RUNTIME_DIR/bedrockoverlinux/import/$(jq -r .activation "$owner")"
+touch "$inbox/ready"
+if "$cli" profile second import "$file" --in-game >"$scratch/wrong-owner" 2>&1; then exit 1; fi
+grep -F 'prefix busy in another profile' "$scratch/wrong-owner"
+"$cli" profile first import "$file" --in-game &
+sender=$!
+for i in {1..100}; do
+    for request in "$inbox"/*.req; do [[ -f "$request" ]] && break 2; done
+    sleep .02
+done
+test "$(cat "$request")" = "Z:$(tr '/' '\\' <<< "$file")"
+mv "$request" "${request%.req}.ack"
+wait "$sender"
+test "$(cat "$pidfile")" = "$wrapper_pid"
+
 unit="bedrock-game-$prefix_id.service"
 systemctl --user stop "$unit"
 wait "$caller" || :  # systemd can report a requested stop as successful.

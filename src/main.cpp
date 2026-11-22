@@ -145,9 +145,10 @@ int main(int argc, char **argv) {
     auto values = leaf(&app, "_complete", "Local shell completion values", [&] { completion_values(value); });
     values->group("");
     values->add_option("kind", value)->required();
-    auto internal = leaf(&app, "_run", "Internal game supervisor", [&] { worker(value); });
+    auto internal = leaf(&app, "_run", "Internal game supervisor", [&] { worker(value, selector.empty() ? uuid() : selector); });
     internal->group("");
     internal->add_option("uuid", value)->required();
+    internal->add_option("session", selector);
     if (argc == 1) {
         std::cout << app.help();
         return 0;

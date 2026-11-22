@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "activation.hpp"
 #include <fstream>
 #include <fcntl.h>
 #include <sys/wait.h>
@@ -250,7 +251,7 @@ void profile_startup(const std::string &selector, const std::string &setting, co
         if (!std::regex_match(key, valid_key)) throw std::runtime_error("invalid environment key: " + key);
         if (action == "unset") configured.erase(key);
         else {
-            if (key == "WINEPREFIX" || key == "WINESERVER" || key == "WINEGDK_BEDROCK_DATA_DIR" || key.rfind("XODUS_", 0) == 0)
+            if (key == "WINEPREFIX" || key == "WINESERVER" || key == "WINEGDK_BEDROCK_DATA_DIR" || key == "WINEGDK_FILE_ACTIVATION_DIR" || key.rfind("XODUS_", 0) == 0)
                 throw std::runtime_error("variable managed by the selected account or prefix: " + key);
             configured[key] = values.at(1);
         }
@@ -265,14 +266,15 @@ void profile_startup(const std::string &selector, const std::string &setting, co
     put("profiles", profile);
 }
 
-void worker(const std::string &selector) {
+void worker(const std::string &selector, const std::string &session_id) {
     if (!is_uuid(selector))
         throw std::runtime_error("invalid worker UUID");
     Lock profile_lock(root() / "locks" / (selector + ".profile"), false, false);
     auto p = lookup(records("profiles"), selector);
     auto px = prefix(p.at("prefix"), false);
     Lock lease(root() / "locks" / (id(px) + ".prefix"), false, false);
-    save(root() / "locks" / (id(px) + ".owner"), {{"profile", id(p)}});
+    ActivationSession session(session_id);
+    save(root() / "locks" / (id(px) + ".owner"), {{"profile", id(p)}, {"activation", session_id}});
     auto a = lookup(records("accounts"), p.at("account"));
     if (p.contains("track")) update_profile_version(p, a);
     if (p.at("version").is_null())
@@ -347,6 +349,7 @@ void worker(const std::string &selector) {
         if (key != "WINEPREFIX" && key != "WINESERVER" && key.rfind("XODUS_", 0) != 0) env[key] = value;
     }
     env["WINEGDK_BEDROCK_DATA_DIR"] = native ? data.string() : "";
+    env["WINEGDK_FILE_ACTIVATION_DIR"] = wine_file_path(session.directory);
     env["BEDROCK_PROFILE_DIR"] = data.string();
     env["BEDROCK_GAME_DIR"] = game.string();
     auto arguments = p.value("args", Args{});
@@ -355,9 +358,7 @@ void worker(const std::string &selector) {
         const auto drive = dir / "dosdevices/z:";
         if (fs::exists(dir / "system.reg") && (!fs::exists(drive) || !fs::equivalent(drive, "/")))
             throw std::runtime_error("in-game imports require the Wine prefix Z: drive to map to /");
-        std::string windows_path = "Z:" + std::string(file);
-        std::replace(windows_path.begin(), windows_path.end(), '/', '\\');
-        arguments.push_back(windows_path);
+        arguments.push_back(wine_file_path(file));
     }
     if (!arguments.empty()) {
         run.push_back("--");
@@ -397,6 +398,7 @@ void worker(const std::string &selector) {
 }
 void profile_command(const std::string &action, const std::string &selector, const std::string &value) {
     Json profile;
+    bool forward = false;
     if (action == "delete") {
         {
             Lock metadata(root() / "locks/metadata");
@@ -511,9 +513,14 @@ void profile_command(const std::string &action, const std::string &selector, con
             return;
         }
         auto state = LaunchChecks{}.availability(profile);
-        if (state != "ready")
-            throw std::runtime_error(state);
+        forward = state == "prefix busy" && !value.empty();
+        if (state != "ready" && !forward) throw std::runtime_error(state);
     }
+    if (forward) {
+        forward_file(profile, value);
+        return;
+    }
+    const auto session_id = uuid();
     auto caller = "bedrock-client-" + uuid() + ".scope";
     Args launch{"systemd-run",
                 "--user",
@@ -528,6 +535,8 @@ void profile_command(const std::string &action, const std::string &selector, con
                 "--pipe",
                 "--collect",
                 "--service-type=exec",
+                "--property=RuntimeDirectory=bedrockoverlinux/import/" + session_id,
+                "--property=RuntimeDirectoryMode=0700",
                 "--property=BindsTo=" + caller,
                 "--property=After=" + caller,
                 "--unit=bedrock-game-" + profile.at("prefix").get<std::string>() + ".service"};
@@ -538,7 +547,7 @@ void profile_command(const std::string &action, const std::string &selector, con
             launch.push_back("--setenv=" + std::string(key) + "=" + val);
     }
     launch.push_back("--setenv=BEDROCK_GAME_IMPORT_FILE=" + value);
-    launch.insert(launch.end(), {fs::read_symlink("/proc/self/exe").string(), "_run", id(profile)});
+    launch.insert(launch.end(), {fs::read_symlink("/proc/self/exe").string(), "_run", id(profile), session_id});
     checked(launch);
 }
 void env_command(const std::string &selector) {
@@ -834,7 +843,8 @@ void import_content(const std::string &selector, const fs::path &file, const std
         throw std::runtime_error("expected .mcpack, .mcaddon, .mcworld or .mctemplate");
     if (!fs::is_regular_file(file)) throw std::runtime_error("missing content file: " + file.string());
     if (in_game) {
-        profile_command("launch", id(p), fs::absolute(file).lexically_normal().string());
+        const auto absolute = fs::absolute(file).lexically_normal();
+        profile_command("launch", id(p), absolute.string());
         return;
     }
     Lock lease(root() / "locks" / (id(p) + ".profile"), false, false);
